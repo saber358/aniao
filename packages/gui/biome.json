@@ -1,0 +1,16 @@
+{
+	"root": false,
+	"formatter": { "lineWidth": 120 },
+	"files": {
+		"includes": [
+			"src/**/*.ts",
+			"test/**/*.ts",
+			"config/**/*.ts",
+			"scripts/**/*.mjs",
+			"e2e/**/*.mjs",
+			"*.json",
+			"electron.vite.config.ts",
+			"vitest.config.ts"
+		]
+	}
+}

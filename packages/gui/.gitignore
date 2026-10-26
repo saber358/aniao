@@ -1,0 +1,4 @@
+.nuxt-ui/
+artifacts/
+build/
+release/

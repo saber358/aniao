@@ -1,0 +1,12 @@
+{
+	"provider": {
+		"id": "aniao",
+		"name": "aniao",
+		"baseUrl": "https://api-slb.krill-code.net",
+		"api": "anthropic-messages",
+		"models": ["grok-4.7"],
+		"reasoning": true,
+		"thinkingLevels": ["low", "medium", "high", "xhigh", "max"]
+	},
+	"defaultThinkingLevel": "high"
+}

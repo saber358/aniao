@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<meta
+			http-equiv="Content-Security-Policy"
+			content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws://127.0.0.1:*;"
+		/>
+		<meta name="color-scheme" content="light dark" />
+		<title>Aniao Harness · 启动</title>
+		<link rel="stylesheet" href="./startup.css" />
+	</head>
+	<body>
+		<main class="startup" aria-label="Aniao Harness 正在启动">
+			<button class="startup-close" type="button" aria-label="关闭应用" title="关闭应用">
+				<img src="./assets/startup-close.svg" width="14" height="14" alt="" />
+			</button>
+			<div class="startup-brand">
+				<img class="startup-mark" src="./assets/startup-terminal.svg" width="48" height="48" alt="" />
+				<h1>Aniao<span class="startup-cursor" aria-hidden="true"></span></h1>
+				<p class="startup-name">HARNESS</p>
+			</div>
+			<div class="startup-loading" role="status" aria-live="polite">
+				<div class="startup-track" aria-hidden="true"><span></span></div>
+				<p id="startup-status">正在准备工作台</p>
+			</div>
+		</main>
+		<script type="module" src="/startup.ts"></script>
+	</body>
+</html>

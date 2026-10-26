@@ -1,0 +1,73 @@
+appId: com.aniao.harness
+productName: Aniao Harness
+copyright: Copyright © 2026 Aniao
+
+# 桌面安装器独立记录分发版本，不改动共享 SDK 包的版本。
+extraMetadata:
+   version: 0.80.18
+
+releaseInfo:
+   releaseNotes: |
+      - 新增插件管理页，可浏览并安装精选 Pi 社区插件，支持 npm、Git 和本地路径来源。
+      - 新增 Goal 原生看板，支持任务进度、当前任务、完成条件、暂停/继续和删除，并只在聚焦会话显示。
+      - 新增子智能体状态行、实时工作步骤、只读转录详情和右侧多标签页。
+      - 修复等待子智能体结束后主任务仍停留在 settling 的问题。
+      - 修复保存自定义 API Key 时的 `An object could not be cloned` 错误。
+      - 优化会话标签页、开始页复用和文件/网页预览。
+
+directories:
+   output: release
+
+# 内测更新通道：客户端从静态目录读取 latest.yml，不使用 HTTPS 或代码签名。
+publish:
+   provider: generic
+   url: http://117.72.245.101/downloads/updates/win/
+
+# 只发布构建产物；生产依赖由 electron-builder 自动收集。
+files:
+   - dist/**
+   - package.json
+   - "!**/*.map"
+
+# SDK 资源不随 asar 打包，安装后位于 resources/sdk，供 PI_PACKAGE_DIR 使用。
+extraResources:
+   - from: node_modules/@earendil-works/pi-coding-agent/package.json
+     to: sdk/package.json
+   - from: node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme
+     to: sdk/dist/modes/interactive/theme
+   - from: node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/assets
+     to: sdk/dist/modes/interactive/assets
+   - from: build/default-provider.json
+     to: defaults/provider.json
+
+asar: true
+# 宿主以 ESM 运行，原生模块和独立入口放到 asar 外，避免 asar 内解析差异。
+asarUnpack:
+   - dist/main/**
+   - "**/*.node"
+   - "**/node-pty/**"
+
+# 原生模块已随依赖提供预编译产物，安装阶段不重新编译。
+npmRebuild: false
+
+# 网络受限时从镜像下载 Electron；可用 ELECTRON_MIRROR 覆盖。
+electronDownload:
+   mirror: https://npmmirror.com/mirrors/electron/
+
+win:
+   target:
+      - target: nsis
+        arch:
+           - x64
+   artifactName: Aniao-Harness-Setup-${version}.${ext}
+
+nsis:
+   oneClick: false
+   perMachine: false
+   allowElevation: true
+   allowToChangeInstallationDirectory: true
+   createDesktopShortcut: true
+   createStartMenuShortcut: true
+   shortcutName: Aniao Harness
+   uninstallDisplayName: Aniao Harness
+   deleteAppDataOnUninstall: false

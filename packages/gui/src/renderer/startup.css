@@ -1,0 +1,212 @@
+:root {
+	color-scheme: light;
+	--startup-surface: #f9fafb;
+	--startup-ink: #0f1115;
+	--startup-muted: #6b7078;
+	--startup-line: #00000010;
+	font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+}
+:root.dark {
+	color-scheme: dark;
+	--startup-surface: #1b1b1c;
+	--startup-ink: #f9fafb;
+	--startup-muted: #92969d;
+	--startup-line: #ffffff12;
+}
+* {
+	box-sizing: border-box;
+}
+html,
+body {
+	width: 100%;
+	height: 100%;
+	margin: 0;
+	overflow: hidden;
+	background: var(--startup-surface);
+	color: var(--startup-ink);
+}
+.startup {
+	position: relative;
+	display: flex;
+	width: 100%;
+	height: 100%;
+	min-height: 260px;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	user-select: none;
+	-webkit-app-region: drag;
+	transition:
+		opacity 180ms ease,
+		transform 180ms ease;
+}
+.startup-close {
+	position: absolute;
+	top: 12px;
+	right: 12px;
+	display: grid;
+	width: 30px;
+	height: 30px;
+	padding: 0;
+	place-items: center;
+	border: 0;
+	border-radius: 7px;
+	background: transparent;
+	opacity: 0.48;
+	cursor: pointer;
+	-webkit-app-region: no-drag;
+}
+.startup-close:hover,
+.startup-close:focus-visible {
+	background: var(--startup-line);
+	opacity: 1;
+}
+.startup-close[hidden] {
+	display: none;
+}
+.startup-close:focus-visible {
+	outline: 1px solid var(--startup-ink);
+	outline-offset: 2px;
+}
+.startup-brand {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	transform: translateY(-10px);
+}
+.startup-mark {
+	width: 42px;
+	height: 42px;
+	margin-bottom: 12px;
+	animation: startup-arrive 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.dark .startup-mark,
+.dark .startup-close img {
+	filter: invert(1);
+}
+.startup h1 {
+	position: relative;
+	margin: 0;
+	font-size: 42px;
+	font-weight: 650;
+	line-height: 1.1;
+	letter-spacing: -1.8px;
+	animation: startup-arrive 650ms 110ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.startup-cursor {
+	position: absolute;
+	right: -9px;
+	bottom: 5px;
+	width: 4px;
+	height: 4px;
+	border-radius: 50%;
+	background: currentColor;
+	animation: startup-cursor 1600ms 700ms ease-in-out both;
+}
+.startup-name {
+	margin: 12px 0 0;
+	padding-left: 4px;
+	color: var(--startup-muted);
+	font-family: "Cascadia Code", Consolas, monospace;
+	font-size: 10px;
+	font-weight: 500;
+	line-height: 1;
+	letter-spacing: 4px;
+	animation: startup-arrive 650ms 190ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.startup-loading {
+	position: absolute;
+	right: 0;
+	bottom: 34px;
+	left: 0;
+	display: grid;
+	justify-items: center;
+	gap: 12px;
+	animation: startup-arrive 650ms 280ms ease both;
+}
+.startup-loading p {
+	margin: 0;
+	color: var(--startup-muted);
+	font-size: 10px;
+	font-weight: 400;
+	line-height: 1.5;
+	letter-spacing: 0.5px;
+}
+.startup-track {
+	width: 88px;
+	height: 2px;
+	overflow: hidden;
+	border-radius: 2px;
+	background: var(--startup-line);
+}
+.startup-track span {
+	display: block;
+	width: 30px;
+	height: 100%;
+	border-radius: inherit;
+	background: var(--startup-ink);
+	opacity: 0.6;
+	animation: startup-sweep 1600ms cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+html.leaving .startup {
+	opacity: 0;
+	transform: translateY(-3px);
+}
+.preview body {
+	display: grid;
+	place-items: center;
+	background: #edeef1;
+}
+.preview.dark body {
+	background: #111113;
+}
+.preview .startup {
+	width: min(480px, calc(100vw - 40px));
+	height: 320px;
+	border: 1px solid var(--startup-line);
+	border-radius: 14px;
+	background: var(--startup-surface);
+	box-shadow: 0 20px 70px #0000000c;
+}
+@keyframes startup-arrive {
+	from {
+		opacity: 0;
+		transform: translateY(7px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+@keyframes startup-sweep {
+	from {
+		transform: translateX(-32px);
+	}
+	to {
+		transform: translateX(90px);
+	}
+}
+@keyframes startup-cursor {
+	0%,
+	100% {
+		opacity: 0;
+	}
+	25%,
+	70% {
+		opacity: 1;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation: none !important;
+		transition: none !important;
+	}
+	.startup-track span {
+		margin-left: 29px;
+	}
+	.startup-cursor {
+		display: none;
+	}
+}

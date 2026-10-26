@@ -1,0 +1,12 @@
+{
+	"extends": "./tsconfig.node.json",
+	"compilerOptions": {
+		"rewriteRelativeImportExtensions": false,
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"types": ["vite/client"],
+		"paths": {
+			"#build/ui/*": ["./node_modules/.nuxt-ui/ui/*"]
+		}
+	},
+	"include": ["src/renderer/**/*.ts", "src/renderer/**/*.vue", "src/domain/**/*.ts", "src/shared/**/*.ts"]
+}

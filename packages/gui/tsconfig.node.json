@@ -1,0 +1,23 @@
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"module": "ESNext",
+		"moduleResolution": "Bundler",
+		"noEmit": true,
+		"types": ["node"],
+		"paths": {
+			"@harness/pi-kernel/auth-storage": ["./node_modules/@earendil-works/pi-coding-agent/dist/core/auth-storage.d.ts"],
+			"@harness/pi-kernel/theme": [
+				"./node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme/theme.d.ts"
+			]
+		}
+	},
+	"include": [
+		"src/main/**/*.ts",
+		"src/host/**/*.ts",
+		"src/preload/**/*.ts",
+		"src/shared/**/*.ts",
+		"config/**/*.ts",
+		"*.config.ts"
+	]
+}
