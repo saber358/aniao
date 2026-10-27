@@ -631,15 +631,19 @@ export async function startApplication(): Promise<void> {
 	});
 	ipcMain.handle(IPC_CHANNELS.mcpSave, async (event, input: unknown) => {
 		verifySender(event);
-		return mcp.save(mcpServerInputSchema.parse(input));
+		const request = mcpServerInputSchema.parse(input);
+		return workspace.changeResources((reload) => mcp.save(request, reload));
 	});
 	ipcMain.handle(IPC_CHANNELS.mcpRemove, async (event, name: unknown) => {
 		verifySender(event);
-		return mcp.remove(mcpServerNameSchema.parse(name));
+		const parsedName = mcpServerNameSchema.parse(name);
+		return workspace.changeResources((reload) => mcp.remove(parsedName, reload));
 	});
 	ipcMain.handle(IPC_CHANNELS.mcpToggle, async (event, name: unknown, enabled: unknown) => {
 		verifySender(event);
-		return mcp.setEnabled(mcpServerNameSchema.parse(name), enabled === true);
+		const parsedName = mcpServerNameSchema.parse(name);
+		if (typeof enabled !== "boolean") throw new Error("MCP 启停状态无效");
+		return workspace.changeResources((reload) => mcp.setEnabled(parsedName, enabled, reload));
 	});
 	ipcMain.handle(IPC_CHANNELS.updateState, async (event) => {
 		verifySender(event);

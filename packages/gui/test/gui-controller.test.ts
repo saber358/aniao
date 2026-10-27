@@ -16,6 +16,51 @@ const logger = { info: vi.fn() };
  *   2) 验证失败保留草稿，不覆盖新输入，不自动重发
  */
 describe("GuiController", () => {
+	/*
+	 * ========================================================================
+	 * 步骤3：验证单条队列操作互斥和失败释放
+	 * ========================================================================
+	 * 数据源：可暂停端口与运行中的会话快照。
+	 * 操作：1) 阻止重复修改和入队；2) 失败后保留编辑草稿并允许重试。
+	 */
+	it("blocks concurrent queue mutations and releases the lock after a rejection", async () => {
+		logger.info("开始验证界面队列修改互斥");
+		const port = new FakeAgentPort();
+		port.current = { ...snapshot(), run: { phase: "working" } };
+		let reject = (_error: Error) => {};
+		port.execute = () =>
+			new Promise<void>((_resolve, fail) => {
+				reject = fail;
+			});
+		const controller = new GuiController(port, logger, port);
+		await controller.connect();
+		try {
+			// 3.1 队列修改期间不能追加新消息，失败不清空普通输入草稿。
+			controller.setDraft("保留草稿");
+			const command = {
+				type: "queueAction" as const,
+				action: "edit" as const,
+				itemId: crypto.randomUUID(),
+				text: "修改",
+			};
+			const pending = controller.send(command);
+			expect(controller.value.queueBusy).toBe(true);
+			expect(await controller.send(command)).toBe(false);
+			expect(await controller.send({ type: "enqueue", mode: "followUp", text: "不能交错" })).toBe(false);
+			reject(new Error("目标已开始处理"));
+			expect(await pending).toBe(false);
+			expect(controller.value.queueBusy).toBe(false);
+			expect(controller.value.error).toBe("目标已开始处理");
+			expect(controller.value.draft).toBe("保留草稿");
+			port.execute = async () => {};
+			expect(await controller.send(command)).toBe(true);
+			expect(port.commands).toHaveLength(2);
+		} finally {
+			controller.dispose();
+			logger.info("界面队列修改互斥验证结束");
+		}
+	});
+
 	it("inserts a revalidated completion at its original caret span without sending", async () => {
 		logger.info("开始验证光标引用草稿保存");
 		const port = new FakeAgentPort();

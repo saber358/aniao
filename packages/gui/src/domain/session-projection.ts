@@ -63,6 +63,9 @@ export class SessionProjection {
 				case "configuration":
 					next.configuration = event.configuration;
 					break;
+				case "resources":
+					next.resources = event.resources;
+					break;
 				case "title":
 					next.title = event.title;
 					break;

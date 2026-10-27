@@ -137,8 +137,8 @@ describe("AgentHost command boundaries", () => {
 			await host.dispatch(envelope({ type: "enqueue", mode: "followUp", text: "相同正文", imageIds }));
 			await host.dispatch(envelope({ type: "enqueue", mode: "followUp", text: "相同正文" }));
 			await host.dispatch(envelope({ type: "enqueue", mode: "steer", text: "引导图片", imageIds }));
-			expect(host.snapshot.queue.followUp).toEqual([{ text: "相同正文", imageIds }, { text: "相同正文" }]);
-			expect(host.snapshot.queue.steering).toEqual([{ text: "引导图片", imageIds }]);
+			expect(host.snapshot.queue.followUp).toMatchObject([{ text: "相同正文", imageIds }, { text: "相同正文" }]);
+			expect(host.snapshot.queue.steering).toMatchObject([{ text: "引导图片", imageIds }]);
 			expect(journal.interrupted.followUp[0].imageIds).toEqual(imageIds);
 			release();
 			await running;

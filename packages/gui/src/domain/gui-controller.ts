@@ -249,10 +249,15 @@ export class GuiController {
 		if (isSubmission && (this.state.submitting || this.state.queueBusy)) return false;
 		if (command.type === "prompt" && snapshot.run.phase !== "idle") return false;
 		if (command.type === "enqueue" && snapshot.run.phase !== "working") return false;
+		if (
+			command.type === "queueAction" &&
+			(this.state.queueBusy || this.state.submitting || snapshot.run.phase !== "working")
+		)
+			return false;
 		if (command.type === "clearQueue" && (this.clearingQueue || snapshot.run.phase !== "idle")) return false;
 		this.logger.info("开始提交界面命令");
-		if (command.type === "clearQueue") {
-			this.clearingQueue = true;
+		if (command.type === "clearQueue" || command.type === "queueAction") {
+			if (command.type === "clearQueue") this.clearingQueue = true;
 			this.publish({ queueBusy: true });
 		}
 		const submission = isSubmission
@@ -295,7 +300,7 @@ export class GuiController {
 			}
 			return false;
 		} finally {
-			if (command.type === "clearQueue") {
+			if (command.type === "clearQueue" || command.type === "queueAction") {
 				this.clearingQueue = false;
 				this.publish({ queueBusy: false });
 			}

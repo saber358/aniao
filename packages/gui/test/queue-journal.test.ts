@@ -76,4 +76,35 @@ describe("QueueJournal", () => {
 		await expect(restored.clear()).rejects.toThrow("先读取");
 		expect(await readFile(path, "utf8")).toBe("{broken");
 	});
+
+	/*
+	 * ========================================================================
+	 * 步骤2：验证单条编辑保持恢复顺序
+	 * ========================================================================
+	 * 数据源：交错的两类写前记录。
+	 * 操作：1) 同模式原位替换；2) 改为引导时追加到引导末尾，撤销恢复原顺序。
+	 */
+	it("preserves edited order and appends steering changes within their mode", async () => {
+		logger.info("开始验证单条修改恢复顺序");
+		const directory = await mkdtemp(join(tmpdir(), "pi-gui-queue-"));
+		directories.push(directory);
+		const journal = new QueueJournal(directory, "cwd", "ordered", logger);
+		try {
+			// 2.1 编辑 B 不得将 B 放到 C 之后。
+			await journal.load();
+			for (const text of ["A", "B", "C"]) await journal.prepare(text, "followUp", text);
+			await journal.prepare("X", "steer", "X");
+			await journal.amend("B", { mode: "followUp", item: { text: "edited B" } });
+			expect(journal.interrupted.followUp.map((item) => item.text)).toEqual(["A", "edited B", "C"]);
+			const undo = await journal.amend("A", { mode: "steer", item: { text: "A" } });
+			expect(journal.interrupted.steering.map((item) => item.text)).toEqual(["X", "A"]);
+			await undo();
+			const reloaded = new QueueJournal(directory, "cwd", "ordered", logger);
+			await reloaded.load();
+			expect(reloaded.recovery.followUp.map((item) => item.text)).toEqual(["A", "edited B", "C"]);
+			expect(reloaded.recovery.steering).toEqual([{ text: "X" }]);
+		} finally {
+			logger.info("单条修改恢复顺序验证结束");
+		}
+	});
 });

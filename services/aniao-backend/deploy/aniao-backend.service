@@ -1,0 +1,22 @@
+[Unit]
+Description=Aniao Harness backend API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aniao
+Group=aniao
+WorkingDirectory=/usr/ds/aniao-backend
+EnvironmentFile=/etc/aniao-backend.env
+ExecStart=/usr/bin/java -Xms128m -Xmx384m -jar /usr/ds/aniao-backend/aniao-backend.jar
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/usr/ds/aniao-backend
+
+[Install]
+WantedBy=multi-user.target

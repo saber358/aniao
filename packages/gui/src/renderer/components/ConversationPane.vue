@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import type { SessionSnapshot } from "../../shared/protocol.ts";
 import type { SubagentSnapshot } from "../../shared/subagents.ts";
 import { type ChatViewMessage, toChatView } from "../adapters/chat-view.ts";
@@ -21,6 +21,7 @@ const emit = defineEmits<{
 	"open-subagent": [runId: string, childId?: string];
 }>();
 const running = computed(() => props.snapshot.run.phase !== "idle");
+const root = ref<HTMLElement | null>(null);
 const runStartedAt = ref<number | null>(null);
 const lastDuration = ref<{ sessionId: string; ms: number } | undefined>(undefined);
 const messages = computed(() =>
@@ -98,6 +99,14 @@ watch(
 	{ immediate: true },
 );
 watch(
+	() => props.snapshot.queue.steering.length,
+	async (value, previous) => {
+		if (value <= previous) return;
+		await nextTick();
+		root.value?.scrollTo({ top: root.value.scrollHeight, behavior: "smooth" });
+	},
+);
+watch(
 	() => props.snapshot.sessionId,
 	() => {
 		lastDuration.value = undefined;
@@ -117,7 +126,7 @@ watch(
 </script>
 
 <template>
-	<div class="conversation-scroll" :class="{ running }" aria-label="对话记录">
+	<div ref="root" class="conversation-scroll" :class="{ running }" aria-label="对话记录">
 		<UChatMessages
 			:messages="timelineMessages"
 			:status="running ? 'streaming' : 'ready'"
@@ -198,5 +207,51 @@ watch(
 				/>
 			</template>
 		</UChatMessages>
+		<div v-if="snapshot.queue.steering.length" class="pending-steering-list" aria-label="等待发送的引导">
+			<div v-for="(item, index) in snapshot.queue.steering" :key="index" class="pending-steering">
+				<p>{{ item.text }}</p>
+				<span class="pending-steering-meta">
+					<span v-if="item.imageIds?.length">图片 {{ item.imageIds.length }} 张</span>
+					<UIcon name="i-lucide-clock" aria-hidden="true" />
+					<span>引导</span>
+				</span>
+			</div>
+		</div>
 	</div>
 </template>
+
+<style scoped>
+.pending-steering-list {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 8px;
+	padding: 4px 0 14px;
+}
+.pending-steering {
+	max-width: min(82%, 620px);
+	padding: 9px 14px;
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--ink) 4%, var(--surface));
+	color: var(--ink);
+}
+.pending-steering p {
+	margin: 0;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	font-size: 14px;
+	line-height: 1.75;
+}
+.pending-steering-meta {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin-top: 4px;
+	color: var(--faint);
+	font-size: 10px;
+}
+.pending-steering-meta svg {
+	width: 11px;
+	height: 11px;
+}
+</style>

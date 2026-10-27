@@ -43,11 +43,11 @@ export class SessionAdapter {
 	private promptActive = false;
 	private readonly userMessageIds = new Map<AgentMessage, string>();
 	private readonly imageSources = new Map<string, string>();
-	private imageEnqueue?: { mode: QueueMode; imageIds: string[] };
+	private imageEnqueue?: { mode: QueueMode; imageIds?: string[]; id?: string };
 	private planRequested = false;
 	private planExecuting = false;
 
-	setImageEnqueue(value?: { mode: QueueMode; imageIds: string[] }): void {
+	setImageEnqueue(value?: { mode: QueueMode; imageIds?: string[]; id?: string }): void {
 		this.imageEnqueue = value;
 	}
 
@@ -81,8 +81,8 @@ export class SessionAdapter {
 			plan: { phase: "off", text: "" },
 			...(session.getContextUsage() ? { contextUsage: session.getContextUsage() } : {}),
 			queue: {
-				steering: session.getSteeringMessages().map((text) => ({ text })),
-				followUp: session.getFollowUpMessages().map((text) => ({ text })),
+				steering: session.getSteeringMessages().map((text) => ({ id: randomUUID(), text })),
+				followUp: session.getFollowUpMessages().map((text) => ({ id: randomUUID(), text })),
 				recovery: { steering: [], followUp: [] },
 				error: null,
 			},
@@ -133,6 +133,35 @@ export class SessionAdapter {
 	updateConfiguration(configuration: Configuration): void {
 		this.flush();
 		this.publish({ type: "configuration", configuration });
+	}
+
+	/*
+	 * ========================================================================
+	 * 步骤5：同步资源快照与单条变更后的队列映射
+	 * ========================================================================
+	 * 数据源：SDK 重载结果和宿主同步提交的消息身份。
+	 * 操作：1) 重载后刷新资源；2) 任意位置变更不使用 FIFO 猜测附件归属。
+	 */
+	updateResources(): void {
+		this.logger.info("开始更新会话资源快照");
+		try {
+			// 5.1 每次从当前 SDK 资源表重新生成。
+			this.flush();
+			this.publish({ type: "resources", resources: buildResources(this.session) });
+		} finally {
+			this.logger.info("会话资源快照更新结束");
+		}
+	}
+
+	replaceQueue(content: QueueContent): void {
+		this.logger.info("开始安装队列条目映射");
+		try {
+			// 5.2 保留恢复内容与错误，只替换活队列。
+			this.flush();
+			this.publish({ type: "queue", queue: { ...this.projection.value.queue, ...content } });
+		} finally {
+			this.logger.info("队列条目映射安装结束");
+		}
 	}
 	updateDialogs(dialogs: DialogRequest[]): void {
 		this.flush();
@@ -385,6 +414,10 @@ export class SessionAdapter {
 			// 3.1 SDK 两类队列各自保持 FIFO；同步追加区间不运行扩展输入回调。
 			const retained = previous.slice(Math.max(0, previous.length - texts.length));
 			return texts.map((text, index) => ({
+				id:
+					retained[index]?.id ??
+					(this.imageEnqueue?.mode === mode && index === texts.length - 1 ? this.imageEnqueue.id : undefined) ??
+					randomUUID(),
 				text,
 				...(retained[index]?.imageIds ? { imageIds: retained[index].imageIds } : {}),
 				...(this.imageEnqueue?.mode === mode && index === texts.length - 1 && texts.length > previous.length

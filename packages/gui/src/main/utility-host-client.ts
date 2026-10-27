@@ -184,7 +184,10 @@ export class UtilityHostClient {
 		// 1.2 prompt 由运行收束结束，不套用普通查询的短超时。
 		const waitForRun =
 			request.type === "transition" ||
-			(request.type === "command" && ["prompt", "approvePlan", "login"].includes(request.value.command.type));
+			(request.type === "command" &&
+				["prompt", "approvePlan", "login", "reloadResources", "queueAction", "enqueue"].includes(
+					request.value.command.type,
+				));
 		return new Promise((resolve, reject) => {
 			const pending: PendingRequest = { resolve, reject };
 			if (!waitForRun)

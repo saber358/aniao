@@ -11,6 +11,7 @@ import { resolveAppAction } from "../domain/app-keybindings.ts";
 import { useWorkspace } from "./composables/use-workspace.ts";
 import { UApp, UButton, UChatPrompt, UDropdownMenu, UIcon, USplitter } from "./ui.ts";
 import ConversationPane from "./components/ConversationPane.vue";
+import FeedbackDialog from "./components/FeedbackDialog.vue";
 import GoalBar from "./components/GoalBar.vue";
 import EditMenu from "./components/EditMenu.vue";
 import SettingsDialog from "./components/SettingsDialog.vue";
@@ -56,6 +57,7 @@ const {
 const logger = createLogger("workspace-actions");
 const bridge = window.piDesktop;
 const settingsOpen = ref(false);
+const feedbackOpen = ref(false);
 const updateDialogOpen = ref(false);
 const parallelOpen = ref(false);
 const updateState = ref<UpdateState | null>(null);
@@ -192,6 +194,16 @@ async function saveCustomProvider(provider: CustomProviderInput) {
 }
 function goalAction(action: "pause" | "resume" | "delete"): void {
 	void controller.send({ type: "goalCommand", action });
+}
+async function queueAction(action: "steer" | "remove" | "edit", itemId: string, text?: string): Promise<boolean> {
+	logger.info("开始提交队列条目操作");
+	try {
+		// 1.6 成功结果交回编辑组件，失败时保留编辑文本。
+		if (changing.value) return false;
+		return await controller.send({ type: "queueAction", action, itemId, ...(text ? { text } : {}) });
+	} finally {
+		logger.info("队列条目操作提交结束");
+	}
 }
 async function deleteCustomProvider(provider: string) {
 	logger.info("开始删除自定义 Provider");
@@ -561,7 +573,10 @@ onBeforeUnmount(() => {
 					</div>
 					<div class="window-controls">
 						<UDropdownMenu
-							:items="[{ label: '检查更新', icon: 'i-lucide-refresh-cw', onSelect: openUpdateDialog }]"
+							:items="[
+								{ label: '检查更新', icon: 'i-lucide-refresh-cw', onSelect: openUpdateDialog },
+								{ label: '发送反馈', icon: 'i-lucide-message-square', onSelect: () => (feedbackOpen = true) },
+							]"
 							:content="{ align: 'end' }"
 						>
 							<UButton
@@ -772,15 +787,17 @@ onBeforeUnmount(() => {
 										/>
 										<TaskQueue
 											v-if="snapshot"
+											:key="`${snapshot.sessionId}-${snapshot.generation}`"
 											:queue="snapshot.queue"
 											:idle="snapshot.run.phase === 'idle'"
-											:disabled="
+											:busy="
+												state.queueBusy ||
+												state.submitting ||
 												changing ||
 												state.connection !== 'connected' ||
-												state.submitting ||
-												state.selectingFiles
+												!!snapshot.dialogs.length
 											"
-											:busy="state.queueBusy"
+											:submit-action="queueAction"
 											@restore="controller.restoreQueue()"
 											@clear="controller.send({ type: 'clearQueue' })"
 										/>
@@ -957,32 +974,7 @@ onBeforeUnmount(() => {
 															/>
 														</div>
 														<UButton
-															v-if="snapshot?.run.phase === 'working'"
-															color="neutral"
-															variant="ghost"
-															size="xs"
-															aria-label="引导当前任务"
-															:disabled="!canEnqueue || !draft.trim() || changing"
-															@click="
-																controller.send({
-																	type: 'enqueue',
-																	mode: 'steer',
-																	text: draft,
-																})
-															"
-															>引导</UButton
-														>
-														<UButton
-															v-if="snapshot?.run.phase === 'working'"
-															type="submit"
-															color="neutral"
-															size="sm"
-															aria-label="加入队列"
-															:disabled="!canEnqueue || !draft.trim() || changing"
-															>排队</UButton
-														>
-														<UButton
-															v-if="snapshot && busy && snapshot.run.phase !== 'idle'"
+															v-if="snapshot && busy && snapshot.run.phase !== 'idle' && !draft.trim()"
 															icon="i-lucide-square"
 															aria-label="停止任务"
 															color="neutral"
@@ -1005,9 +997,9 @@ onBeforeUnmount(() => {
 																!draft.trim() ||
 																planAwaiting ||
 																changing ||
-																busy ||
-																hasQueue ||
-																state.connection !== 'connected'
+																(canEnqueue
+																	? false
+																	: busy || hasQueue || state.connection !== 'connected')
 															"
 														/>
 													</div>
@@ -1016,7 +1008,7 @@ onBeforeUnmount(() => {
 										</ImageInputZone>
 										<ExtensionPanel v-if="extensionState" :state="extensionState" placement="belowEditor" />
 										<p v-if="state.imageIds.length" class="muted attachment-note">
-											PNG 或 JPEG 需填写文字说明，可排队或引导。中断后请核对聊天记录再发送。
+											运行中发送会加入排队；排队消息可选择引导或删除。中断后请核对聊天记录再发送。
 										</p>
 									</div>
 								</section>
@@ -1069,6 +1061,14 @@ onBeforeUnmount(() => {
 				:update-installing="updateAction === 'install'"
 				:update-error="updateError"
 				:saving="saving"
+				:resources-busy="
+					changing ||
+					state.connection !== 'connected' ||
+					state.submitting ||
+					!!snapshot?.dialogs.length ||
+					(!!snapshot && snapshot.run.phase !== 'idle') ||
+					(!!snapshot?.plan && !['off', 'completed'].includes(snapshot.plan.phase))
+				"
 				:error="state.error"
 				@save="saveAuthentication"
 				@save-provider="saveCustomProvider"
@@ -1084,6 +1084,7 @@ onBeforeUnmount(() => {
 				@install-update="runUpdateAction('install')"
 				@open-skills="openSkillsDirectory"
 			/>
+			<FeedbackDialog v-model="feedbackOpen" />
 			<ParallelTasksDialog v-model="parallelOpen" :cwd="snapshot?.cwd ?? null" @open-session="openParallelJob" />
 			<InteractionDialog
 				v-if="snapshot?.dialogs[0] && state.connection === 'connected'"

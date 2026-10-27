@@ -21,9 +21,11 @@ function adapter(): { value: SessionAdapter; messages: AgentMessage[]; emit: (ev
 			getCwd: () => process.cwd(),
 			getSessionName: () => null,
 			getBranch: () => [],
+			getEntries: () => [],
 		},
 		messages,
 		isStreaming: false,
+		getContextUsage: () => undefined,
 		getSteeringMessages: () => [],
 		getFollowUpMessages: () => [],
 		resourceLoader: {

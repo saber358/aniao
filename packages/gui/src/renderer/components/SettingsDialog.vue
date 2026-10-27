@@ -27,6 +27,7 @@ const props = defineProps<{
 	updateError: string | null;
 	saving: boolean;
 	error: string | null;
+	resourcesBusy?: boolean;
 }>();
 const open = defineModel<boolean>({ default: false });
 const emit = defineEmits<{
@@ -103,6 +104,7 @@ const mcpServers = ref<McpServerSummary[]>([]);
 const mcpBusy = ref(false);
 const mcpEditing = ref(false);
 const mcpError = ref("");
+const mcpResult = ref("");
 const mcpName = ref("");
 const mcpType = ref<"stdio" | "http">("stdio");
 const mcpCommand = ref("");
@@ -376,7 +378,16 @@ function saveCustomProvider() {
 	logger.info("自定义 Provider 添加提交结束");
 }
 
+/*
+ * ========================================================================
+ * 步骤6：互斥提交 MCP 变更并显示应用结果
+ * ========================================================================
+ * 数据源：主进程原子配置与当前会话重载结果。
+ * 操作：1) 禁止连点；2) 失败保留表单，成功后同步列表和状态。
+ */
 async function loadMcpServers() {
+	if (mcpBusy.value) return;
+	logger.info("开始读取 MCP 配置");
 	mcpBusy.value = true;
 	mcpError.value = "";
 	try {
@@ -385,10 +396,12 @@ async function loadMcpServers() {
 		mcpError.value = error instanceof Error ? error.message : "MCP 配置读取失败";
 	} finally {
 		mcpBusy.value = false;
+		logger.info("MCP 配置读取结束");
 	}
 }
 
 function startAddMcp() {
+	if (mcpBusy.value || props.resourcesBusy) return;
 	mcpEditing.value = true;
 	mcpError.value = "";
 	mcpName.value = "";
@@ -399,6 +412,7 @@ function startAddMcp() {
 }
 
 async function saveMcpServer() {
+	if (mcpBusy.value || props.resourcesBusy) return;
 	const name = mcpName.value.trim();
 	if (!/^[A-Za-z0-9_-]+$/.test(name)) {
 		mcpError.value = "MCP 名称只能包含字母、数字、下划线和连字符";
@@ -412,8 +426,11 @@ async function saveMcpServer() {
 		mcpError.value = "HTTP 类型需要填写以 http:// 或 https:// 开头的 URL";
 		return;
 	}
+	logger.info("开始保存并应用 MCP 配置");
+	// 6.1 原表单保留到宿主确认重载成功。
 	mcpBusy.value = true;
 	mcpError.value = "";
+	mcpResult.value = "";
 	try {
 		mcpServers.value = await window.piDesktop.saveMcpServer({
 			name,
@@ -430,34 +447,48 @@ async function saveMcpServer() {
 			enabled: true,
 		});
 		mcpEditing.value = false;
+		mcpResult.value = props.configuration ? "配置已应用到当前会话" : "配置已保存，打开项目后生效";
 	} catch (error) {
 		mcpError.value = error instanceof Error ? error.message : "MCP 保存失败";
 	} finally {
 		mcpBusy.value = false;
+		logger.info("MCP 配置保存和应用结束");
 	}
 }
 
 async function toggleMcpServer(server: McpServerSummary) {
+	if (mcpBusy.value || props.resourcesBusy) return;
+	logger.info("开始切换 MCP 启停状态");
+	// 6.2 列表仅采用主进程返回值，不提前翻转本地开关。
 	mcpBusy.value = true;
 	mcpError.value = "";
+	mcpResult.value = "";
 	try {
 		mcpServers.value = await window.piDesktop.setMcpServerEnabled(server.name, !server.enabled);
+		mcpResult.value = props.configuration ? "配置已应用到当前会话" : "配置已保存，打开项目后生效";
 	} catch (error) {
 		mcpError.value = error instanceof Error ? error.message : "MCP 状态更新失败";
 	} finally {
 		mcpBusy.value = false;
+		logger.info("MCP 启停状态切换结束");
 	}
 }
 
 async function removeMcpServer(server: McpServerSummary) {
+	if (mcpBusy.value || props.resourcesBusy) return;
+	logger.info("开始删除并卸载 MCP 服务");
+	// 6.3 删除失败不提前从可见列表移除。
 	mcpBusy.value = true;
 	mcpError.value = "";
+	mcpResult.value = "";
 	try {
 		mcpServers.value = await window.piDesktop.removeMcpServer(server.name);
+		mcpResult.value = props.configuration ? "配置已应用到当前会话" : "配置已保存，打开项目后生效";
 	} catch (error) {
 		mcpError.value = error instanceof Error ? error.message : "MCP 删除失败";
 	} finally {
 		mcpBusy.value = false;
+		logger.info("MCP 服务删除和卸载结束");
 	}
 }
 
@@ -872,6 +903,8 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 
 				<section v-else-if="active === 'mcp'" class="settings-section models-section">
 					<h3>MCP 服务器</h3>
+					<p v-if="resourcesBusy && !mcpBusy" class="settings-muted">请等待当前任务、交互或计划结束后再修改。</p>
+					<p v-if="mcpResult" class="settings-muted" role="status">{{ mcpResult }}</p>
 					<div class="provider-list">
 						<div v-for="server in mcpServers" :key="server.name" class="provider-card">
 							<div class="provider-main">
@@ -892,6 +925,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 								<button
 									type="button"
 									class="mcp-switch"
+									:disabled="mcpBusy || resourcesBusy"
 									:class="{ on: server.enabled }"
 									:aria-label="`${server.enabled ? '停用' : '启用'} ${server.name}`"
 									@click="toggleMcpServer(server)"
@@ -904,14 +938,15 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 									variant="ghost"
 									size="xs"
 									:aria-label="`删除 ${server.name}`"
+									:disabled="mcpBusy || resourcesBusy"
 									@click="removeMcpServer(server)"
 								/>
 							</div>
 						</div>
 						<p v-if="!mcpServers.length && !mcpBusy" class="settings-muted">还没有 MCP 服务器。</p>
-						<p v-if="mcpBusy" class="settings-muted">正在读取 MCP 配置…</p>
+						<p v-if="mcpBusy" class="settings-muted" role="status">正在处理 MCP 配置…</p>
 					</div>
-					<button type="button" class="provider-add" @click="startAddMcp">
+					<button type="button" class="provider-add" :disabled="mcpBusy || resourcesBusy" @click="startAddMcp">
 						<UIcon name="i-lucide-plus" aria-hidden="true" />
 						<span>新建 MCP 服务器</span>
 					</button>
@@ -965,8 +1000,12 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 							</template>
 							<p v-if="mcpError" class="workspace-error" role="alert">{{ mcpError }}</p>
 							<div class="settings-actions">
-								<UButton type="submit" color="neutral" :loading="mcpBusy">保存</UButton>
-								<UButton color="neutral" variant="ghost" @click="mcpEditing = false">取消</UButton>
+								<UButton type="submit" color="neutral" :loading="mcpBusy" :disabled="mcpBusy || resourcesBusy"
+									>保存</UButton
+								>
+								<UButton color="neutral" variant="ghost" :disabled="mcpBusy" @click="mcpEditing = false"
+									>取消</UButton
+								>
 							</div>
 						</form>
 					</div>

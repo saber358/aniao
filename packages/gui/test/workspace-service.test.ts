@@ -58,6 +58,88 @@ class Host extends FakeAgentPort implements ManagedHost {
  *   2) 未发送会话保留身份和草稿，未知 ID 无法读取
  */
 describe("WorkspaceService", () => {
+	/*
+	 * ========================================================================
+	 * 步骤7：验证资源写入前检查和重载互斥
+	 * ========================================================================
+	 * 数据源：可控活动宿主和配置回调。
+	 * 操作：1) 忙碌或待批准计划不得写文件；2) 重载时保留交互回复通道。
+	 */
+	it("rejects resource writes while busy or awaiting approval and releases failed changes", async () => {
+		logger.info("开始验证资源保存前置条件");
+		const directory = await mkdtemp(join(tmpdir(), "pi-gui-workspace-"));
+		directories.push(directory);
+		const host = new Host(await realpath(directory), "current");
+		const workspace = new WorkspaceService(new WorkspaceStore(join(directory, "state"), logger), () => host, logger);
+		await workspace.attach(directory);
+		const operation = vi.fn(async () => "saved");
+		try {
+			// 7.1 互斥检查发生在配置回调之前，拒绝时不改变磁盘配置。
+			host.current.run.phase = "working";
+			await expect(workspace.changeResources(operation)).rejects.toThrow("任务或交互");
+			host.current.run.phase = "idle";
+			host.current.plan = { phase: "awaiting", text: "待批准" };
+			await expect(workspace.changeResources(operation)).rejects.toThrow("批准或取消");
+			expect(operation).not.toHaveBeenCalled();
+			host.current.plan = { phase: "off", text: "" };
+			await expect(
+				workspace.changeResources(async () => {
+					throw new Error("disk full");
+				}),
+			).rejects.toThrow("disk full");
+			expect(await workspace.changeResources(operation)).toBe("saved");
+		} finally {
+			await workspace.close();
+			logger.info("资源保存前置条件验证结束");
+		}
+	});
+
+	it("holds resource exclusion through host reload while permitting replies", async () => {
+		logger.info("开始验证会话资源重载互斥");
+		const directory = await mkdtemp(join(tmpdir(), "pi-gui-workspace-"));
+		directories.push(directory);
+		const host = new Host(await realpath(directory), "current");
+		const workspace = new WorkspaceService(new WorkspaceStore(join(directory, "state"), logger), () => host, logger);
+		await workspace.attach(directory);
+		let finish = () => {};
+		let enter = () => {};
+		const entered = new Promise<void>((resolve) => {
+			enter = resolve;
+		});
+		host.execute = async (envelope) => {
+			if (envelope.command.type !== "reloadResources") return;
+			enter();
+			await new Promise<void>((resolve) => {
+				finish = resolve;
+			});
+		};
+		try {
+			// 7.2 配置写入回调和宿主重载处于同一个锁区间，reply 不等待自身完成。
+			const changing = workspace.changeResources(async (reload) => {
+				await reload();
+				return "applied";
+			});
+			await entered;
+			await expect(workspace.newSession()).rejects.toThrow("等待当前操作");
+			await expect(workspace.changeResources(async () => {})).rejects.toThrow("等待当前操作");
+			const identity = { requestId: crypto.randomUUID(), sessionId: "current", generation: host.current.generation };
+			await expect(workspace.dispatch({ ...identity, command: { type: "prompt", text: "不能交错" } })).rejects.toThrow(
+				"连接项目",
+			);
+			await workspace.dispatch({
+				...identity,
+				command: { type: "reply", reply: { id: crypto.randomUUID(), cancelled: true } },
+			});
+			finish();
+			expect(await changing).toBe("applied");
+			expect(host.commands.map((envelope) => envelope.command.type)).toEqual(["reloadResources", "reply"]);
+		} finally {
+			finish();
+			await workspace.close();
+			logger.info("会话资源重载互斥验证结束");
+		}
+	});
+
 	it("does not create a replacement after closing during an extension transition", async () => {
 		logger.info("开始验证退出取消待处理切换");
 		const directory = await mkdtemp(join(tmpdir(), "pi-gui-workspace-"));

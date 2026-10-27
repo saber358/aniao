@@ -1,0 +1,47 @@
+server:
+  port: ${ANIAO_PORT:8081}
+  address: ${ANIAO_BIND_ADDRESS:127.0.0.1}
+  forward-headers-strategy: framework
+  compression:
+    enabled: true
+
+spring:
+  application:
+    name: aniao-backend
+  datasource:
+    url: jdbc:h2:file:${ANIAO_DATA_DIR:./data}/aniao;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  servlet:
+    multipart:
+      max-file-size: 8MB
+      max-request-size: 32MB
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+app:
+  jwt:
+    secret: ${ANIAO_JWT_SECRET:aniao-development-secret-change-this-please}
+    ttl-days: ${ANIAO_JWT_TTL_DAYS:7}
+  admin:
+    username: ${ANIAO_ADMIN_USERNAME:admin}
+    password: ${ANIAO_ADMIN_PASSWORD:}
+  time-zone: ${ANIAO_TIME_ZONE:Asia/Shanghai}
+
+logging:
+  charset:
+    console: UTF-8
+    file: UTF-8
+  level:
+    root: INFO
+    com.aniao.backend: INFO

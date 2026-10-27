@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import type { ImageImport, ImageRead } from "../shared/images.ts";
@@ -153,6 +154,44 @@ export class WorkspaceService {
 
 	async getSnapshot(): Promise<SessionSnapshot | null> {
 		return this.host ? this.host.getSnapshot() : null;
+	}
+
+	/*
+	 * ========================================================================
+	 * 步骤7：锁定活动宿主后修改并重载资源
+	 * ========================================================================
+	 * 数据源：当前空闲会话与配置服务事务。
+	 * 操作：1) 文件写入前拒绝忙碌状态；2) 重载期间允许扩展交互回复。
+	 */
+	async changeResources<T>(operation: (reload: () => Promise<void>) => Promise<T>): Promise<T> {
+		if (this.closed || this.changing || this.pendingCommands > 0) throw new Error("请等待当前操作结束");
+		this.changing = true;
+		const host = this.host;
+		this.logger.info("开始修改工作区资源配置");
+		try {
+			// 7.1 未连接项目时只保存全局配置，下次创建会话会读取新配置。
+			const snapshot = host ? await host.getSnapshot() : null;
+			if (host?.isClosed) throw new Error("会话已断开，请重新打开项目");
+			if (snapshot && (snapshot.run.phase !== "idle" || snapshot.dialogs.length || snapshot.authentication.flow))
+				throw new Error("请等待当前任务或交互结束后再修改 MCP");
+			if (snapshot?.plan && !["off", "completed"].includes(snapshot.plan.phase))
+				throw new Error("请先批准或取消当前计划，再修改 MCP");
+			if (this.closed) throw new Error("桌面工作区已关闭");
+			return await operation(async () => {
+				// 7.2 复用长命令通道；主进程互斥在配置落盘前已经建立。
+				if (!host || !snapshot) return;
+				if (this.closed || host.isClosed || this.host !== host) throw new Error("会话已更换，请重新打开项目");
+				await host.dispatch({
+					requestId: randomUUID(),
+					sessionId: snapshot.sessionId,
+					generation: snapshot.generation,
+					command: { type: "reloadResources" },
+				});
+			});
+		} finally {
+			this.changing = false;
+			this.logger.info("工作区资源配置修改结束");
+		}
 	}
 
 	async listPlugins(): Promise<PluginPackage[]> {

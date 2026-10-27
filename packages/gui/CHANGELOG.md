@@ -4,6 +4,7 @@
 
 ### Added
 
+- Added anonymous feedback with optional images, explicit submission, bounded requests and preserved input after failures or closing the dialog; no account or token is required.
 - Added a plugin manager for Pi packages: installed package list, curated community catalog, npm/Git/local installation and removal through the Pi package manager, plus built-in capability overview.
 - Added a native goal dashboard above the composer for `pi-goal-x`: live status, task progress, current task, completion contract, usage, pause reason, expandable task tree, and pause/resume/delete controls routed through the plugin commands.
 - Added inline subagent status rows with a live per-agent work step line and kept the main turn in a waiting state until active Pi subagent runs settle.
@@ -89,6 +90,9 @@
 
 ### Fixed
 
+- Mutate queued messages by stable identity without replaying the live queue; reject consumed targets and late input callbacks, preserve write-ahead order, and keep edited attachments consistent with recovery.
+- Restore the idle queue's recover-to-draft and clear controls, and retain edited text until the host confirms the change.
+- Apply MCP saves, enable/disable and removal to the current idle session through serialized atomic writes and resource reload, with rollback on reload failure and guards for active tasks, interactions and pending plans.
 - Only show the goal dashboard when the current session has a `pi-goal-focus` entry for that goal, so goals do not leak into unrelated sessions in the same project.
 - Normalize renderer commands before crossing the contextBridge, so Vue reactive proxies no longer cause `An object could not be cloned` when saving custom API providers.
 - Settle waiting runs when the main prompt finishes and poll subagent activity while waiting, so completed workflows cannot leave the UI stuck in settling.

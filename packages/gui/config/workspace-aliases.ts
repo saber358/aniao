@@ -24,6 +24,7 @@ const subpathAliases = [
 	replacement: dirname(fileURLToPath(import.meta.resolve(`@earendil-works/pi-ai/${subpath}/${entry}`))),
 }));
 export const workspaceAliases = [
+	{ find: "@harness/pi-kernel/prompt-templates", replacement: join(kernelDirectory, "dist/core/prompt-templates.js") },
 	{ find: "@harness/pi-kernel/auth-storage", replacement: join(kernelDirectory, "dist/core/auth-storage.js") },
 	{ find: "@harness/pi-kernel/theme", replacement: join(kernelDirectory, "dist/modes/interactive/theme/theme.js") },
 	...subpathAliases,

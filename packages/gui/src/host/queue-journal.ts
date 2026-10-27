@@ -3,7 +3,14 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import type { Logger } from "../shared/logger.ts";
-import { type QueueContent, type QueueMode, queueItemSchema, queueModeSchema } from "../shared/queue.ts";
+import {
+	QUEUE_TEXT_LIMIT,
+	type QueueContent,
+	type QueueItem,
+	type QueueMode,
+	queueItemSchema,
+	queueModeSchema,
+} from "../shared/queue.ts";
 import { writeJsonAtomically } from "../storage/atomic-json.ts";
 
 const entrySchema = queueItemSchema.extend({ id: z.string().min(1), mode: queueModeSchema });
@@ -110,6 +117,36 @@ export class QueueJournal {
 
 	rollback(id: string): Promise<void> {
 		return this.write(() => ({ entries: this.entries.filter((entry) => entry.id !== id), recovered: this.recovered }));
+	}
+
+	/*
+	 * ========================================================================
+	 * 步骤2：先保存单条修改意图，失败后可恢复原记录
+	 * ========================================================================
+	 * 数据源：入队请求身份和修改后的正文、模式及附件。
+	 * 操作：1) 保留其他已接收记录；2) SDK 拒绝迟到修改时恢复写前状态。
+	 */
+	async amend(id: string, replacement: { mode: QueueMode; item: QueueItem } | null): Promise<() => Promise<void>> {
+		this.logger.info("开始保存队列修改意图");
+		let previous: Entry[] = [];
+		try {
+			// 2.1 变更只替换目标记录，不丢弃本轮已消费输入的恢复信息。
+			await this.write(() => {
+				previous = this.entries;
+				const original = this.entries.find((entry) => entry.id === id);
+				const next = replacement ? { ...replacement.item, id, mode: replacement.mode } : undefined;
+				const entries =
+					next && original?.mode === next.mode
+						? this.entries.map((entry) => (entry.id === id ? next : entry))
+						: [...this.entries.filter((entry) => entry.id !== id), ...(next ? [next] : [])];
+				if ([...entries, ...this.recovered].reduce((length, entry) => length + entry.text.length, 0) > QUEUE_TEXT_LIMIT)
+					throw new Error("本轮追加消息已达长度上限");
+				return { entries, recovered: this.recovered };
+			});
+			return () => this.write(() => ({ entries: previous, recovered: this.recovered }));
+		} finally {
+			this.logger.info("队列修改意图保存结束");
+		}
 	}
 
 	checkpoint(queue: QueueContent): Promise<void> {
