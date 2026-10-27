@@ -59,6 +59,11 @@ export interface TurnHeaderData {
 	running?: boolean;
 }
 
+export interface ViewedImagesData {
+	id: string;
+	imageIds: string[];
+}
+
 export type ChatViewMessage = UIMessage<
 	{
 		copyText: string;
@@ -72,6 +77,7 @@ export type ChatViewMessage = UIMessage<
 	},
 	{
 		tool: ToolActivity;
+		viewedImages: ViewedImagesData;
 		error: string;
 		process: ProcessSummary;
 		edits: EditedFilesSummary;
@@ -132,7 +138,7 @@ export function toChatView(
 				text: block.text,
 			}));
 			// 1.3 工具与错误使用真实 data part，让没有正文的助手消息也能展示。
-			for (const tool of toolsByMessage.get(message.id) ?? []) parts.push({ type: "data-tool", data: tool });
+			appendTools(parts, toolsByMessage.get(message.id) ?? []);
 			if (message.error) parts.push({ type: "data-error", data: message.error });
 			const edited = editTargets.get(index);
 			if (edited) parts.push({ type: "data-edits", data: edited });
@@ -218,9 +224,7 @@ function toCollapsedChatView(
 					if (block.durationMs !== undefined) thinkingDurations[block.text] = block.durationMs;
 				} else if (block.kind === "text" && index !== finalIndex) processParts.push({ type: "text", text: block.text });
 			}
-			for (const tool of toolsByMessage.get(message.id) ?? []) {
-				processParts.push({ type: "data-tool", data: tool });
-			}
+			appendTools(processParts, toolsByMessage.get(message.id) ?? []);
 			if (message.error && index !== finalIndex) processParts.push({ type: "data-error", data: message.error });
 		}
 		view.push({
@@ -278,7 +282,7 @@ function baseMessage(message: ChatMessage, toolsByMessage: Map<string, ToolActiv
 		type: block.kind === "thinking" ? "reasoning" : "text",
 		text: block.text,
 	}));
-	for (const tool of toolsByMessage.get(message.id) ?? []) parts.push({ type: "data-tool", data: tool });
+	appendTools(parts, toolsByMessage.get(message.id) ?? []);
 	if (message.error) parts.push({ type: "data-error", data: message.error });
 	const thinkingDurations: Record<string, number> = {};
 	for (const block of message.blocks) {
@@ -304,6 +308,32 @@ function baseMessage(message: ChatMessage, toolsByMessage: Map<string, ToolActiv
 			thinkingDurations,
 		},
 	};
+}
+
+/*
+ * ========================================================================
+ * 步骤2：把连续成功的图片读取合并为查看步骤
+ * ========================================================================
+ * 数据源：SDK 已返回的工具图片身份，不按文件扩展名猜测成功。
+ * 操作：1) 相邻图片读取合并并保持顺序；2) 文本、失败与其他工具保留原展示。
+ */
+function appendTools(parts: ChatViewMessage["parts"], tools: ToolActivity[]): void {
+	logger.info("开始映射图片查看步骤");
+	try {
+		for (const tool of tools) {
+			// 2.1 正在运行、读取失败或未返回图片时，不能显示“已查看”。
+			if (tool.name !== "read" || tool.state !== "succeeded" || !tool.imageIds?.length) {
+				parts.push({ type: "data-tool", data: tool });
+				continue;
+			}
+			// 2.2 同一组的每次查看都保留缩略图，不按重复文件内容吞掉次数。
+			const previous = parts.at(-1);
+			if (previous?.type === "data-viewedImages") previous.data.imageIds.push(...tool.imageIds);
+			else parts.push({ type: "data-viewedImages", data: { id: tool.id, imageIds: [...tool.imageIds] } });
+		}
+	} finally {
+		logger.info("图片查看步骤映射结束");
+	}
 }
 
 function collectCreatedFiles(tools: ToolActivity[], cwd: string | undefined): CreatedFilesSummary | undefined {

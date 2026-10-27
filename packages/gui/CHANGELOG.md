@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added image tabs opened from workspace files, with PNG/JPEG/GIF/WebP/SVG previews, image dimensions, zoom, original size, automatic panel fitting and retry after read or decoding failures. See [image previews](docs/image-preview.md).
+
 - Added concurrent ordinary sessions with retained SDK hosts, independent controllers and drafts, per-session running/attention indicators, and direct navigation back from plugin or automation pages while tasks continue.
 
 - Added anonymous feedback with optional images, explicit submission, bounded requests and preserved input after failures or closing the dialog; no account or token is required.
@@ -77,6 +79,10 @@
 
 ### Changed
 
+- Show successful image reads as a collapsed “已查看 X 张图片” step with one row of lazy-loaded thumbnails, grouping consecutive reads and restoring the same images from SDK tool history.
+
+- Removed the pending-attention label from sidebar session rows; running indicators and disconnected labels remain visible.
+
 - Completed turns now collapse into a “已工作” header; expanding it reveals assistant text, reasoning and tool results in message order.
 - Running turns show a “工作中” row immediately after the user message, with a live pulsing reasoning preview and a divider; completed reasoning rows show their duration.
 - Tool rows use per-tool icons and include the command, path, query or skill name inline.
@@ -91,6 +97,8 @@
 - Application updates now require an explicit download click from the sidebar, General Settings, or Help; automatic checks only fetch metadata, and all three entry points share progress and retry state.
 
 ### Fixed
+
+- Fixed sessions showing a running spinner when merely opened: distinguish extension initialization from task preparation, reconcile host state after subscribing without accepting stale snapshots, and keep pending metadata commands out of task indicators.
 
 - Fixed goal dashboard session isolation and startup recovery by reading the active branch focus through the SDK host and the plugin's structured `get_goal` interface; support external goal pools, configured control aliases, confirmation-bound request lifetimes, accurate lifecycle states, bounded text and visible retryable failures.
 

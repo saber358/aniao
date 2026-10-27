@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
 import { zh_cn } from "@nuxt/ui/locale";
-import type { ThinkingLevel } from "../shared/protocol.ts";
+import { isTaskRunning, type ThinkingLevel } from "../shared/protocol.ts";
 import type { ParallelJob } from "../shared/parallel.ts";
 import type { CustomProviderInput } from "../shared/provider.ts";
 import type { UpdateState } from "../shared/update.ts";
@@ -984,7 +984,9 @@ onBeforeUnmount(() => {
 															/>
 														</div>
 														<UButton
-															v-if="snapshot && busy && snapshot.run.phase !== 'idle' && !draft.trim()"
+															v-if="
+																snapshot && busy && isTaskRunning(snapshot.run.phase) && !draft.trim()
+															"
 															icon="i-lucide-square"
 															aria-label="停止任务"
 															color="neutral"

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import type { SubagentSnapshot } from "../../shared/subagents.ts";
+import { PROJECT_IMAGE_PATTERN } from "../../shared/project-browser.ts";
 import { UButton, UIcon } from "../ui.ts";
 import { createLogger } from "../../shared/logger.ts";
 import BrowserPane from "./BrowserPane.vue";
@@ -169,7 +170,7 @@ function icon(tab: SideTab): string {
 	if (tab.type === "terminal") return "i-lucide-terminal";
 	if (tab.type === "browser") return "i-lucide-globe";
 	if (tab.type === "subagent") return "i-lucide-bot";
-	if (tab.type === "file") return "i-lucide-file-text";
+	if (tab.type === "file") return PROJECT_IMAGE_PATTERN.test(tab.path ?? "") ? "i-lucide-image" : "i-lucide-file-text";
 	return "i-lucide-file-text";
 }
 
@@ -340,7 +341,7 @@ defineExpose({ openTool, openFile, openUrl, openHtmlFile, openStart, openSubagen
 						@open-worktree="emit('open-worktree', $event)"
 					/>
 					<TerminalPanel v-else-if="tab.type === 'terminal'" :cwd="props.cwd" :with-header="false" />
-					<WorkspaceFiles v-else-if="tab.type === 'files'" :cwd="props.cwd" />
+					<WorkspaceFiles v-else-if="tab.type === 'files'" :cwd="props.cwd" @open="openFile" />
 					<FilePreview v-else-if="tab.type === 'file' && tab.path" :cwd="props.cwd" :path="tab.path" />
 					<SubagentDetail
 						v-else-if="tab.type === 'subagent'"

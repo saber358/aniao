@@ -191,7 +191,7 @@ export class AgentHost {
 	async initialize(): Promise<void> {
 		this.logger.info("开始绑定桌面扩展");
 		this.submitting = true;
-		this.adapter.beginPrompt();
+		this.adapter.beginInitialization();
 		try {
 			// 4.1 RPC 模式仅承诺可序列化 UI；终端工厂由适配器明确拒绝。
 			await this.runtime.session.bindExtensions({
@@ -211,7 +211,7 @@ export class AgentHost {
 			}
 		} finally {
 			this.submitting = false;
-			this.adapter.endPrompt();
+			this.adapter.endInitialization();
 			this.logger.info("桌面扩展绑定结束");
 		}
 	}
@@ -355,14 +355,14 @@ export class AgentHost {
 						 */
 						this.logger.info("开始重载会话资源");
 						if (this.planTools) throw new Error("请先批准或取消当前计划，再修改 MCP");
-						this.adapter.beginPrompt();
+						this.adapter.beginInitialization();
 						try {
 							// 5.1 初始化期间的扩展交互仍由独立 reply 命令响应。
 							await session.reload();
 							await this.goals.bind();
 						} finally {
 							this.adapter.updateResources();
-							this.adapter.endPrompt();
+							this.adapter.endInitialization();
 							this.logger.info("会话资源重载结束");
 						}
 						break;

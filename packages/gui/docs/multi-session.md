@@ -6,10 +6,12 @@ WorkspaceService 为已打开的每个会话保留一个独立 utilityProcess。
 
 SessionControllers 为每个 `sessionId + generation` 保存独立 GuiController。消息、工具、队列、提交等待和草稿各自归属原 Controller。后台任务结束或报错不会清空当前会话草稿，也不会解除另一会话的提交等待。工作台重载后重新订阅主进程已保留的宿主，不重放任务。
 
-命令始终携带会话 ID 和宿主代次，主进程按身份选择宿主。快照查询同样限定身份。后台宿主退出只通知对应会话；侧栏按会话显示运行、待处理或断开状态。后台扩展需要确认时，可切回该会话回复。停止按钮只取消当前显示会话的任务。
+命令始终携带会话 ID 和宿主代次，主进程按身份选择宿主。快照查询同样限定身份。后台宿主退出只通知对应会话；侧栏按会话显示运行或断开状态，不显示“待处理”标签。后台扩展需要确认时，可切回该会话回复。停止按钮只取消当前显示会话的任务。
+
+扩展加载与资源重载使用 `initializing` 阶段，期间阻止提交，但不显示任务转圈、工作中或停止按钮。运行标记只来自真实任务阶段，普通设置命令等待不算任务。宿主登记先订阅，再补读快照；按事件序号拒绝旧状态，避免初始化或任务结束后转圈残留。扩展若启动了实际 SDK 任务，初始化结束不会覆盖其运行状态。
 
 导航不触发扩展的会话销毁或切换回调，因为原运行时仍存在。创建分支仍要求来源空闲，并保留原有扩展取消钩子。文件选择和配置事务保持短期互斥。删除工作区前检查该目录下所有已打开会话，仍有任务时拒绝移除。退出应用会尝试关闭全部宿主，单个保存失败不跳过其他进程。
 
 普通会话在用户选择的目录运行，同目录会话共享工作区文件。需要文件隔离时可以在独立工作树打开会话，或使用自动化页已有的隔离并行任务入口。应用退出会停止进程；重启只恢复会话记录，不自动重放之前的任务。
 
-验证入口为 `test/multi-session.test.ts`、`test/workspace-service.test.ts` 与 `test/gui-controller.test.ts`。真实 Electron 验收先启动 `node scripts/dev-server.mjs`，再运行 `node e2e/multi-session.mjs`。非默认开发端口使用 `ELECTRON_RENDERER_URL`。验收只调用本机 SSE 模型替身，报告保存在 `artifacts/multi-session-*/results.json`。
+验证入口为 `test/multi-session.test.ts`、`test/workspace-run-status.test.ts`、`test/workspace-service.test.ts` 与 `test/gui-controller.test.ts`。真实 Electron 验收先启动 `node scripts/dev-server.mjs`，再运行 `node e2e/multi-session.mjs`。覆盖初始化弹窗期间无任务标记、打开与重启恢复不发送模型请求、两个任务独立转圈和停止。非默认开发端口使用 `ELECTRON_RENDERER_URL`。验收只调用本机 SSE 模型替身，报告保存在 `artifacts/multi-session-*/results.json`。

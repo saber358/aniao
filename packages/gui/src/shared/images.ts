@@ -9,6 +9,11 @@ export const IMAGE_BASE64_LIMIT = Math.ceil(IMAGE_BYTES_LIMIT / 3) * 4;
 export const IMAGE_DIMENSION_LIMIT = 8192;
 export const IMAGE_PIXEL_LIMIT = 16_000_000;
 
+// SDK 工具返回的图片保留原 MIME，按需读取，不沿用草稿的四张输入限制。
+export const TOOL_IMAGE_COUNT_LIMIT = 64;
+export const TOOL_IMAGE_BASE64_LIMIT = Math.ceil((8 * 1024 * 1024) / 3) * 4;
+export const TOOL_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
 export interface ImageRead extends ProjectFileSelection {
 	imageId: string;
 	source: "draft" | "message";

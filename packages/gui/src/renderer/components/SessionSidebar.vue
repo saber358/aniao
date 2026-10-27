@@ -341,9 +341,9 @@ async function rename() {
 								<span v-if="session.pinned" class="pin-indicator">置顶</span
 								><span class="session-name">{{ runtimeById.get(session.id)?.title || session.title }}</span>
 							</button>
-							<span v-if="runtimeById.get(session.id)?.attention" class="session-attention">{{
-								runtimeById.get(session.id)?.connected ? "待处理" : "已断开"
-							}}</span>
+							<span v-if="runtimeById.get(session.id)?.connected === false" class="session-attention"
+								>已断开</span
+							>
 							<span class="session-time">{{ relativeTime(session.updatedAt) }}</span>
 							<UDropdownMenu :items="actions(session)"
 								><UButton
@@ -380,9 +380,7 @@ async function rename() {
 							aria-label="正在运行"
 						></span>
 						<span class="session-name">{{ runtimeById.get(session.id)?.title || session.title }}</span>
-						<span v-if="runtimeById.get(session.id)?.attention" class="session-attention">{{
-							runtimeById.get(session.id)?.connected ? "待处理" : "已断开"
-						}}</span>
+						<span v-if="runtimeById.get(session.id)?.connected === false" class="session-attention">已断开</span>
 						<span class="session-time">{{ relativeTime(session.updatedAt) }}</span>
 					</button>
 					<button

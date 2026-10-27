@@ -107,6 +107,30 @@ await writeFile(
 		compaction: { enabled: false },
 	}),
 );
+await mkdir(join(agentDirectory, "extensions"));
+await writeFile(
+	join(agentDirectory, "extensions", "initialization.js"),
+	`const logger = console;
+/*
+ * ========================================================================
+ * 步骤1：停留在真实扩展初始化阶段
+ * ========================================================================
+ * 数据源：独立测试会话的 session_start 事件。
+ * 操作：1) 等待界面取消输入；2) 不提交模型任务。
+ */
+export default function (pi) {
+	pi.on("session_start", async (_event, ctx) => {
+		logger.info("开始等待初始化验收输入");
+		try {
+			// 1.1 用可见交互控制初始化结束时机。
+			await ctx.ui.input("初始化验收");
+		} finally {
+			logger.info("初始化验收输入结束");
+		}
+	});
+}
+`,
+);
 
 async function current() {
 	return page.evaluate(() => window.piDesktop.getSnapshot());
@@ -119,6 +143,82 @@ async function waitFor(check, message) {
 		await delay(50);
 	}
 	throw new Error(message);
+}
+
+/*
+ * ========================================================================
+ * 步骤3：核对首次打开与应用恢复时的初始化状态
+ * ========================================================================
+ * 数据源：真实扩展弹窗、侧栏运行标记和本机模型请求计数。
+ * 操作：1) 初始化不显示任务；2) 应用重启不重发历史任务。
+ */
+async function launchDesktop(environment) {
+	logger.info("开始启动多会话验收窗口");
+	try {
+		// 3.1 每次启动复用同一隔离 profile，完整重建宿主与 Renderer。
+		page = undefined;
+		application = await _electron.launch({
+			executablePath: packagedExecutable ?? electronExecutable,
+			args: [...(packagedExecutable ? [] : [join(root, "dist/main/index.cjs")]), `--user-data-dir=${profile}`],
+			cwd: packagedExecutable ? dirname(packagedExecutable) : root,
+			env: environment,
+			timeout: 60000,
+		});
+		const log = createWriteStream(join(artifacts, "electron.log"), { flags: "a" });
+		application.process().stdout.pipe(log, { end: false });
+		application.process().stderr.on("data", (chunk) => {
+			stderr += chunk;
+		});
+		application.process().stderr.pipe(log, { end: false });
+		application.process().once("exit", () => log.end());
+		const deadline = Date.now() + 60000;
+		while (!page && Date.now() < deadline) {
+			page = application
+				.windows()
+				.find(
+					(candidate) =>
+						candidate.url().startsWith(packagedExecutable ? "file:" : renderer) &&
+						!candidate.url().includes("startup.html"),
+				);
+			if (!page) await delay(50);
+		}
+		assert(page, "未找到工作台窗口");
+		page.setDefaultTimeout(20000);
+		page.on("pageerror", (error) => failures.push(error.message));
+		page.on("console", (message) => {
+			if (message.type() === "error" || (message.type() === "warning" && message.text().startsWith("[Vue warn]")))
+				failures.push(message.text().slice(0, 300));
+		});
+		await page.waitForFunction(() => !!window.piDesktop);
+	} finally {
+		logger.info("多会话验收窗口启动结束");
+	}
+}
+
+async function finishInitialization(running, requestCount) {
+	logger.info("开始验证初始化没有任务标记");
+	try {
+		// 3.2 扩展还在等待输入，不能先跳过初始化再核对运行指示器。
+		const value = await waitFor((value) => value.dialogs[0]?.title === "初始化验收", "扩展初始化交互未出现");
+		const dialog = page.getByRole("dialog", { name: "初始化验收", exact: true });
+		await dialog.waitFor();
+		assert.equal(value.run.phase, "initializing");
+		assert.equal(requests.length, requestCount);
+		assert.equal(
+			(await page.evaluate(() => window.piDesktop.getSessionRuntimes())).filter((entry) => entry.running).length,
+			running,
+		);
+		assert.equal(await page.locator(".session-running-spinner").count(), running);
+		assert.equal(await page.locator(".conversation-scroll.running").count(), 0);
+		assert.equal(await page.getByRole("button", { name: "停止任务", exact: true }).count(), 0);
+		await page.screenshot({ path: join(artifacts, `initializing-${requestCount}.png`), fullPage: true });
+		await dialog.getByRole("button", { name: "取消", exact: true }).click();
+		await waitFor((value) => value.run.phase === "idle" && !value.dialogs.length, "初始化未收束");
+		assert.equal(requests.length, requestCount);
+		return value;
+	} finally {
+		logger.info("初始化没有任务标记验证结束");
+	}
 }
 
 try {
@@ -148,44 +248,16 @@ try {
 		for (const key of Object.keys(environment)) if (key.toLowerCase() === "path") delete environment[key];
 		environment.Path = process.env.PI_GUI_TEST_PATH;
 	}
-	application = await _electron.launch({
-		executablePath: packagedExecutable ?? electronExecutable,
-		args: [...(packagedExecutable ? [] : [join(root, "dist/main/index.cjs")]), `--user-data-dir=${profile}`],
-		cwd: packagedExecutable ? dirname(packagedExecutable) : root,
-		env: environment,
-		timeout: 60000,
-	});
-	const log = createWriteStream(join(artifacts, "electron.log"));
-	application.process().stdout.pipe(log, { end: false });
-	application.process().stderr.on("data", (chunk) => {
-		stderr += chunk;
-	});
-	application.process().stderr.pipe(log, { end: false });
-	application.process().once("exit", () => log.end());
-	const deadline = Date.now() + 60000;
-	while (!page && Date.now() < deadline) {
-		page = application
-			.windows()
-			.find(
-				(candidate) =>
-					candidate.url().startsWith(packagedExecutable ? "file:" : renderer) &&
-					!candidate.url().includes("startup.html"),
-			);
-		if (!page) await delay(50);
-	}
-	assert(page, "未找到工作台窗口");
-	page.setDefaultTimeout(20000);
-	page.on("pageerror", (error) => failures.push(error.message));
-	page.on("console", (message) => {
-		if (message.type() === "error" || (message.type() === "warning" && message.text().startsWith("[Vue warn]")))
-			failures.push(message.text().slice(0, 300));
-	});
-	await page.waitForFunction(() => !!window.piDesktop);
+	await launchDesktop(environment);
 	await application.evaluate(({ dialog }, cwd) => {
 		dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [cwd] });
 	}, project);
 	await page.getByRole("button", { name: "打开项目", exact: true }).last().click();
-	await waitFor((value) => value.run.phase === "idle", "项目初始化失败");
+	await finishInitialization(0, 0);
+	await page.reload({ waitUntil: "domcontentloaded" });
+	await page.locator("textarea").waitFor();
+	assert.equal(await page.locator(".session-running-spinner").count(), 0);
+	assert.equal(requests.length, 0);
 	await page.locator("textarea").fill("任务A");
 	await page.getByRole("button", { name: "发送任务", exact: true }).click();
 	const a = await waitFor((value) => value.run.phase === "working", "A 未开始运行");
@@ -199,6 +271,7 @@ try {
 	assert.equal((await current()).run.phase, "working");
 	// 2.2 A 运行中创建 B 并发出第二个请求，两个真实 utilityProcess 均保持活动。
 	await page.getByRole("button", { name: "新会话", exact: true }).click();
+	await finishInitialization(1, 1);
 	const b = await waitFor((value) => value.sessionId !== a.sessionId && value.run.phase === "idle", "B 未创建");
 	await page.locator("textarea").fill("任务B");
 	await page.getByRole("button", { name: "发送任务", exact: true }).click();
@@ -244,6 +317,13 @@ try {
 		(await page.evaluate(() => window.piDesktop.getSessionRuntimes())).filter((entry) => entry.running).length,
 		0,
 	);
+	// 3.3 关闭应用后从落盘会话恢复，初始化与历史读取均不再发送模型请求。
+	await application.close();
+	await launchDesktop(environment);
+	const restored = await finishInitialization(0, 2);
+	assert.equal(restored.sessionId, b.sessionId);
+	assert.notEqual(restored.generation, b.generation);
+	assert.equal(await page.locator(".session-running-spinner").count(), 0);
 	assert.deepEqual(failures, []);
 	assert(!/UnhandledPromiseRejection|unhandledRejection/u.test(stderr));
 	await page.screenshot({ path: join(artifacts, "multi-session.png"), fullPage: true });
@@ -251,6 +331,10 @@ try {
 		passed: true,
 		requests,
 		checks: [
+			"opening-does-not-run",
+			"initialization-does-not-spin",
+			"idle-renderer-reload",
+			"restore-does-not-run",
 			"return-from-plugins-via-session",
 			"create-while-running",
 			"two-concurrent-requests",

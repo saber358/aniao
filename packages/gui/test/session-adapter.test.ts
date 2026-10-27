@@ -2,7 +2,7 @@ import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { describe, expect, it, vi } from "vitest";
 import { SessionAdapter } from "../src/host/session-adapter.ts";
-import { eventEnvelopeSchema, type SessionEvent } from "../src/shared/protocol.ts";
+import { eventEnvelopeSchema, isTaskRunning, type SessionEvent } from "../src/shared/protocol.ts";
 import { snapshot } from "./fixtures.ts";
 import { pngFixture } from "./image-fixture.ts";
 import { createHarness } from "./sdk-harness.ts";
@@ -19,6 +19,47 @@ const logger = { info: vi.fn() };
  *   2) 核对事件连续、快照可恢复与 agent_settled 的收束语义
  */
 describe("SessionAdapter with real AgentSession", () => {
+	it("keeps initialization separate without hiding work started before it finishes", async () => {
+		logger.info("开始验证初始化不会覆盖真实运行");
+		const harness = await createHarness();
+		const adapter = new SessionAdapter(harness.session, snapshot().configuration, logger, true);
+		let enter = () => {};
+		let finish = () => {};
+		const entered = new Promise<void>((resolve) => {
+			enter = resolve;
+		});
+		const gate = new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+		harness.setResponses([
+			async () => {
+				enter();
+				await gate;
+				return fauxAssistantMessage("扩展任务完成");
+			},
+		]);
+		try {
+			// 1.3 初始化本身不消费模型响应，真实 SDK agent_start 才进入运行。
+			adapter.beginInitialization();
+			expect(adapter.snapshot.run.phase).toBe("initializing");
+			expect(isTaskRunning(adapter.snapshot.run.phase)).toBe(false);
+			expect(harness.getPendingResponseCount()).toBe(1);
+			const running = harness.session.prompt("扩展恢复任务");
+			await entered;
+			adapter.endInitialization();
+			expect(adapter.snapshot.run.phase).toBe("working");
+			adapter.beginInitialization();
+			expect(adapter.snapshot.run.phase).toBe("working");
+			finish();
+			await running;
+			expect(adapter.snapshot.run.phase).toBe("idle");
+		} finally {
+			finish();
+			adapter.dispose();
+			harness.cleanup();
+			logger.info("初始化不会覆盖真实运行验证结束");
+		}
+	});
 	it("keeps image bytes out of snapshots and serves only current session image identities", async () => {
 		logger.info("开始验证历史图片按需读取");
 		const harness = await createHarness();

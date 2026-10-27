@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import type { ProjectEntry, ProjectFileContent } from "../../shared/project-browser.ts";
+import { PROJECT_IMAGE_PATTERN, type ProjectEntry, type ProjectFileContent } from "../../shared/project-browser.ts";
+import { createLogger } from "../../shared/logger.ts";
 import { UButton, UIcon } from "../ui.ts";
 
 const props = defineProps<{ cwd: string }>();
+const emit = defineEmits<{ open: [path: string] }>();
+const logger = createLogger("workspace-files");
 const bridge = window.piDesktop;
 const path = ref("");
 const entries = ref<ProjectEntry[]>([]);
@@ -37,19 +40,37 @@ async function load(next: string): Promise<void> {
 	}
 }
 
+/*
+ * ========================================================================
+ * 步骤1：按文件类型打开右侧预览
+ * ========================================================================
+ * 数据源：当前项目目录列表中的文件身份。
+ * 操作：1) 图片交给独立预览标签；2) 目录和文本继续保留列表内的浏览方式。
+ */
 async function open(entry: ProjectEntry): Promise<void> {
-	if (entry.type === "directory") {
-		await load(entry.path);
-		return;
-	}
-	loading.value = true;
-	error.value = "";
+	logger.info("开始打开工作区条目");
 	try {
-		file.value = await bridge.readProjectFile({ cwd: props.cwd, path: entry.path });
-	} catch (reason) {
-		error.value = message(reason);
+		// 1.1 图片使用专用预览通道，不先按文本读取。
+		if (entry.type === "file" && PROJECT_IMAGE_PATTERN.test(entry.path)) {
+			emit("open", entry.path);
+			return;
+		}
+		// 1.2 其他条目沿用当前目录与文本预览。
+		if (entry.type === "directory") {
+			await load(entry.path);
+			return;
+		}
+		loading.value = true;
+		error.value = "";
+		try {
+			file.value = await bridge.readProjectFile({ cwd: props.cwd, path: entry.path });
+		} catch (reason) {
+			error.value = message(reason);
+		} finally {
+			loading.value = false;
+		}
 	} finally {
-		loading.value = false;
+		logger.info("工作区条目打开结束");
 	}
 }
 
@@ -115,7 +136,13 @@ watch(
 				@click="open(entry)"
 			>
 				<UIcon
-					:name="entry.type === 'directory' ? 'i-lucide-folder' : 'i-lucide-file-text'"
+					:name="
+						entry.type === 'directory'
+							? 'i-lucide-folder'
+							: PROJECT_IMAGE_PATTERN.test(entry.path)
+								? 'i-lucide-image'
+								: 'i-lucide-file-text'
+					"
 					class="file-icon"
 					aria-hidden="true"
 				/>

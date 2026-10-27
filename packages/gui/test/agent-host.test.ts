@@ -52,6 +52,32 @@ async function createHost(harness: Harness) {
  *   2) 准备失败恢复空闲，迟到的旧会话命令不能运行
  */
 describe("AgentHost command boundaries", () => {
+	it("initializes and reloads extensions without preparing or sending a model task", async () => {
+		logger.info("开始验证扩展加载不冒充任务");
+		const harness = await createHarness();
+		const { host, envelope } = await createHost(harness);
+		const prompt = vi.spyOn(harness.session, "prompt");
+		const phases: string[] = [];
+		const release = host.adapter.subscribe((event) => {
+			if (event.event.type === "run") phases.push(event.event.run.phase);
+		});
+		try {
+			// 1.3 加载和重载只切换初始化状态，不调用 prompt。
+			await host.initialize();
+			await host.dispatch(envelope({ type: "reloadResources" }));
+			expect(phases).toEqual(["initializing", "idle", "initializing", "idle"]);
+			expect(prompt).not.toHaveBeenCalled();
+			expect(harness.session.messages).toEqual([]);
+			vi.spyOn(harness.session, "bindExtensions").mockRejectedValueOnce(new Error("扩展加载失败"));
+			await expect(host.initialize()).rejects.toThrow("扩展加载失败");
+			expect(host.snapshot.run.phase).toBe("idle");
+		} finally {
+			release();
+			await host.dispose();
+			harness.cleanup();
+			logger.info("扩展加载不冒充任务验证结束");
+		}
+	});
 	it("binds startup dialogs before accepting work and honors extension transition cancellation", async () => {
 		logger.info("开始验证扩展生命周期交互");
 		const harness = await createHarness({
@@ -70,6 +96,8 @@ describe("AgentHost command boundaries", () => {
 		try {
 			const initializing = host.initialize();
 			await vi.waitFor(() => expect(host.snapshot.dialogs[0]?.title).toBe("启动输入"));
+			expect(host.snapshot.run.phase).toBe("initializing");
+			expect(harness.session.isStreaming).toBe(false);
 			await expect(host.dispatch(envelope({ type: "prompt", text: "不能绕过交互" }))).rejects.toThrow("当前交互");
 			const startupId = host.snapshot.dialogs[0].id;
 			await host.dispatch(envelope({ type: "reply", reply: { id: startupId, cancelled: true } }));

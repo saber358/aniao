@@ -12,6 +12,7 @@ import type {
 	ProjectFileSelection,
 } from "../shared/project-files.ts";
 import type { AgentPort, CommandEnvelope, PortNotification, SessionSnapshot } from "../shared/protocol.ts";
+import { isTaskRunning } from "../shared/protocol.ts";
 import type { SubagentInspection } from "../shared/subagents.ts";
 import type {
 	Draft,
@@ -54,6 +55,7 @@ interface HostedSession {
 	host: ManagedHost;
 	runtime: SessionRuntime;
 	phase: SessionSnapshot["run"]["phase"];
+	seq: number;
 	pending: number;
 	dialogs: boolean;
 	failed: boolean;
@@ -162,6 +164,8 @@ export class WorkspaceService {
 				await this.store.rememberProject(normalized);
 				await this.store.rememberSessions(normalized, entries);
 				await this.store.remember(normalized, { ...summary, pinned: false, archived: false }, true);
+				// 1.4 先订阅再补读快照，覆盖历史查询和索引保存期间漏收的状态。
+				if (!this.hosts.has(next)) await this.trackHost(next, current);
 			} catch (error) {
 				if (created) await next.close();
 				throw error;
@@ -171,7 +175,6 @@ export class WorkspaceService {
 				throw new Error("桌面工作区已关闭");
 			}
 			// 1.2 每个会话只持有一个宿主；恢复已有会话直接复用，不重启其任务或 Goal。
-			if (!this.hosts.has(next)) this.trackHost(next, current);
 			this.host = next;
 			this.recentHosts.set(normalized, next);
 			this.publishRuntimes();
@@ -191,10 +194,11 @@ export class WorkspaceService {
 	 * 步骤8：保留独立会话宿主并按身份路由事件
 	 * ========================================================================
 	 * 数据源：每个 utilityProcess 的会话身份、运行阶段与交互事件。
-	 * 操作：1) 所有会话持续更新，前端按身份订阅；2) 后台退出只标记对应会话。
+	 * 操作：1) 订阅后补读快照并拒绝旧状态；2) 后台退出只标记对应会话。
 	 */
-	private trackHost(host: ManagedHost, snapshot: SessionSnapshot): void {
+	private async trackHost(host: ManagedHost, snapshot: SessionSnapshot): Promise<void> {
 		this.logger.info("开始登记独立会话宿主");
+		let entry: HostedSession | undefined;
 		try {
 			for (const previous of this.hosts.values()) {
 				if (
@@ -207,25 +211,29 @@ export class WorkspaceService {
 				}
 			}
 			// 8.1 只缓存导航所需状态；完整消息由各会话自己的 SDK 和 Controller 持有。
-			const entry: HostedSession = {
+			const tracked: HostedSession = {
 				host,
 				pending: 0,
 				dialogs: snapshot.dialogs.length > 0,
 				failed: snapshot.messages.at(-1)?.error !== undefined,
 				phase: snapshot.run.phase,
+				seq: snapshot.seq,
 				release: () => {},
 				runtime: {
 					cwd: snapshot.cwd,
 					sessionId: snapshot.sessionId,
 					generation: snapshot.generation,
 					title: snapshot.title,
-					running: snapshot.run.phase !== "idle",
+					running: isTaskRunning(snapshot.run.phase),
 					attention: snapshot.dialogs.length > 0 || snapshot.messages.at(-1)?.error !== undefined,
 					connected: true,
 				},
 			};
-			this.hosts.set(host, entry);
-			entry.release = host.subscribe((notification) => {
+			entry = tracked;
+			const observed = { run: snapshot.seq, dialogs: snapshot.seq, title: snapshot.seq, failed: snapshot.seq };
+			this.hosts.set(host, tracked);
+			tracked.release = host.subscribe((notification) => {
+				const entry = tracked;
 				if (this.closed) return;
 				let update = false;
 				if (notification.type === "disconnected") {
@@ -235,27 +243,36 @@ export class WorkspaceService {
 				} else if (notification.type === "event") {
 					if (
 						notification.value.sessionId !== entry.runtime.sessionId ||
-						notification.value.generation !== entry.runtime.generation
+						notification.value.generation !== entry.runtime.generation ||
+						notification.value.seq <= entry.seq
 					)
 						return;
+					entry.seq = notification.value.seq;
 					const event = notification.value.event;
 					if (event.type === "run") {
+						observed.run = entry.seq;
 						entry.phase = event.run.phase;
-						if (entry.phase === "preparing") entry.failed = false;
+						if (entry.phase === "preparing") {
+							entry.failed = false;
+							observed.failed = entry.seq;
+						}
 						entry.runtime = {
 							...entry.runtime,
-							running: entry.phase !== "idle" || entry.pending > 0,
+							running: !host.isClosed && entry.runtime.connected && isTaskRunning(entry.phase),
 							attention: entry.dialogs || entry.failed,
 						};
 						update = true;
 					} else if (event.type === "dialogs") {
+						observed.dialogs = entry.seq;
 						entry.dialogs = event.dialogs.length > 0;
 						entry.runtime = { ...entry.runtime, attention: entry.dialogs || entry.failed };
 						update = true;
 					} else if (event.type === "title") {
+						observed.title = entry.seq;
 						entry.runtime = { ...entry.runtime, title: event.title };
 						update = true;
 					} else if (event.type === "message" && event.message.error) {
+						observed.failed = entry.seq;
 						entry.failed = true;
 						entry.runtime = { ...entry.runtime, attention: true };
 						update = true;
@@ -264,6 +281,25 @@ export class WorkspaceService {
 				for (const listener of this.listeners) listener(notification);
 				if (update) this.publishRuntimes();
 			});
+			// 8.4 各字段分别核对序号；新标题不妨碍补回订阅前漏收的任务结束。
+			const latest = await host.getSnapshot();
+			if (this.closed || host.isClosed) throw new Error("桌面工作区已关闭");
+			if (latest.sessionId !== tracked.runtime.sessionId || latest.generation !== tracked.runtime.generation)
+				throw new Error("会话身份已变化，请重新打开会话");
+			tracked.seq = Math.max(tracked.seq, latest.seq);
+			if (latest.seq >= observed.run) tracked.phase = latest.run.phase;
+			if (latest.seq >= observed.dialogs) tracked.dialogs = latest.dialogs.length > 0;
+			if (latest.seq >= observed.failed) tracked.failed = latest.messages.at(-1)?.error !== undefined;
+			tracked.runtime = {
+				...tracked.runtime,
+				title: latest.seq >= observed.title ? latest.title : tracked.runtime.title,
+				running: tracked.runtime.connected && isTaskRunning(tracked.phase),
+				attention: tracked.dialogs || tracked.failed,
+			};
+		} catch (error) {
+			entry?.release();
+			this.hosts.delete(host);
+			throw error;
 		} finally {
 			this.logger.info("独立会话宿主登记结束");
 		}
@@ -409,7 +445,7 @@ export class WorkspaceService {
 			entry.pending--;
 			entry.runtime = {
 				...entry.runtime,
-				running: !entry.host.isClosed && (entry.phase !== "idle" || entry.pending > 0),
+				running: !entry.host.isClosed && entry.runtime.connected && isTaskRunning(entry.phase),
 			};
 			if (!this.closed) this.publishRuntimes();
 		}

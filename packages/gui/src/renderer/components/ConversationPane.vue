@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import type { SessionSnapshot } from "../../shared/protocol.ts";
+import { isTaskRunning, type SessionSnapshot } from "../../shared/protocol.ts";
 import type { SubagentSnapshot } from "../../shared/subagents.ts";
 import { type ChatViewMessage, toChatView } from "../adapters/chat-view.ts";
 import { UButton, UChatMessages, UIcon } from "../ui.ts";
@@ -13,6 +13,7 @@ import TurnHeader from "./TurnHeader.vue";
 import CopyButton from "./CopyButton.vue";
 import ImageAttachment from "./ImageAttachment.vue";
 import SubagentStatus from "./SubagentStatus.vue";
+import ViewedImages from "./ViewedImages.vue";
 
 const props = defineProps<{ snapshot: SessionSnapshot; disabled: boolean }>();
 const emit = defineEmits<{
@@ -20,7 +21,7 @@ const emit = defineEmits<{
 	"open-file": [path: string];
 	"open-subagent": [runId: string, childId?: string];
 }>();
-const running = computed(() => props.snapshot.run.phase !== "idle");
+const running = computed(() => isTaskRunning(props.snapshot.run.phase));
 const root = ref<HTMLElement | null>(null);
 const runStartedAt = ref<number | null>(null);
 const lastDuration = ref<{ sessionId: string; ms: number } | undefined>(undefined);
@@ -176,6 +177,12 @@ watch(
 						:streaming="message.metadata?.streaming === true"
 					/>
 					<ToolActivityBlock v-else-if="part.type === 'data-tool'" :tool="part.data" />
+					<ViewedImages
+						v-else-if="part.type === 'data-viewedImages'"
+						:data="part.data"
+						:session-id="snapshot.sessionId"
+						:generation="snapshot.generation"
+					/>
 					<CreatedFilesSummary
 						v-else-if="part.type === 'data-files'"
 						:data="part.data"

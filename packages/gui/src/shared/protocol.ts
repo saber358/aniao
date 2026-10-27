@@ -11,7 +11,7 @@ import {
 	goalReadRequestSchema,
 	goalSnapshotSchema,
 } from "./goals.ts";
-import { imageIdSchema, imageIdsSchema, imageUrlSchema } from "./image-schema.ts";
+import { imageIdSchema, imageIdsSchema, imageUrlSchema, toolImageIdsSchema } from "./image-schema.ts";
 import type { ImagesPort } from "./images.ts";
 import { DRAFT_TEXT_LIMIT } from "./input-limits.ts";
 import { authenticationSchema, dialogReplySchema, dialogRequestSchema, extensionStateSchema } from "./interactions.ts";
@@ -68,7 +68,17 @@ const identifier = z.string().min(1).max(4096);
 export const clipboardTextSchema = z.string().min(1).max(CLIPBOARD_TEXT_LIMIT);
 export const thinkingLevelSchema = z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 export const runStateSchema = z.object({
-	phase: z.enum(["idle", "preparing", "working", "waiting", "stopping", "compacting", "retrying", "settling"]),
+	phase: z.enum([
+		"idle",
+		"initializing",
+		"preparing",
+		"working",
+		"waiting",
+		"stopping",
+		"compacting",
+		"retrying",
+		"settling",
+	]),
 	detail: z.string().max(8192).optional(),
 });
 export const messageSchema = z.object({
@@ -96,6 +106,7 @@ export const toolSchema = z.object({
 	output: z.string().max(262144),
 	truncated: z.boolean(),
 	state: z.enum(["running", "succeeded", "failed", "interrupted"]),
+	imageIds: toolImageIdsSchema.optional(),
 });
 export const modelSchema = z.object({
 	key: identifier,
@@ -281,6 +292,11 @@ export type SessionEvent = z.infer<typeof eventEnvelopeSchema>;
 export type PortNotification = z.infer<typeof notificationSchema>;
 export type HostRequest = z.infer<typeof hostRequestSchema>;
 export type HostResponse = z.infer<typeof hostResponseSchema>;
+
+// 1.4 初始化占用会话入口，但没有任务；所有运行标记共用这个判断。
+export function isTaskRunning(phase: SessionSnapshot["run"]["phase"]): boolean {
+	return phase !== "idle" && phase !== "initializing";
+}
 
 export interface AgentPort {
 	getSnapshot(): Promise<SessionSnapshot | null>;

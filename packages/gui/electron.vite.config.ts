@@ -129,6 +129,7 @@ export default defineConfig({
 							"lucide:list-checks",
 							"lucide:cpu",
 							"lucide:image-plus",
+							"lucide:images",
 							"lucide:folder",
 							"lucide:sparkles",
 							"lucide:file-text",

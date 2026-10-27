@@ -2,8 +2,13 @@ import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { SessionProjection } from "../domain/session-projection.ts";
-import { imageDataSchema } from "../shared/image-schema.ts";
-import { IMAGE_BASE64_LIMIT, IMAGE_COUNT_LIMIT } from "../shared/images.ts";
+import { imageDataSchema, toolImageDataSchema } from "../shared/image-schema.ts";
+import {
+	IMAGE_BASE64_LIMIT,
+	IMAGE_COUNT_LIMIT,
+	TOOL_IMAGE_COUNT_LIMIT,
+	TOOL_IMAGE_MIME_TYPES,
+} from "../shared/images.ts";
 import type { AuthenticationState, DialogRequest, ExtensionState } from "../shared/interactions.ts";
 import type { Logger } from "../shared/logger.ts";
 import type { PlanState } from "../shared/plan.ts";
@@ -54,7 +59,7 @@ export class SessionAdapter {
 	getImage(imageId: string): string {
 		const data = this.imageSources.get(imageId);
 		if (!data) throw new Error("图片已不在当前会话中，请刷新");
-		return `data:image/png;base64,${data}`;
+		return data;
 	}
 
 	constructor(session: AgentSession, configuration: Configuration, logger: Logger, deferSettlement = false) {
@@ -429,6 +434,35 @@ export class SessionAdapter {
 		}
 	}
 
+	/*
+	 * ========================================================================
+	 * 步骤6：区分资源初始化与用户任务
+	 * ========================================================================
+	 * 数据源：宿主扩展绑定、资源重载和 SDK 实际运行事件。
+	 * 操作：1) 初始化只锁住提交入口；2) 结束时保留扩展已启动的真实任务。
+	 */
+	beginInitialization(): void {
+		this.logger.info("开始发布会话初始化状态");
+		try {
+			// 6.1 不设置任务准备标记，已经运行的 SDK 任务保持原状态。
+			this.flush();
+			if (this.projection.value.run.phase === "idle") this.publish({ type: "run", run: { phase: "initializing" } });
+		} finally {
+			this.logger.info("会话初始化状态发布结束");
+		}
+	}
+
+	endInitialization(): void {
+		this.logger.info("开始清理会话初始化状态");
+		try {
+			// 6.2 agent_start 等事件拥有任务状态，初始化完成不能覆盖它们。
+			this.flush();
+			if (this.projection.value.run.phase === "initializing") this.publish({ type: "run", run: { phase: "idle" } });
+		} finally {
+			this.logger.info("会话初始化状态清理结束");
+		}
+	}
+
 	beginPrompt(): void {
 		this.logger.info("开始准备任务");
 		this.promptActive = true;
@@ -503,7 +537,7 @@ export class SessionAdapter {
 					if (!imageDataSchema.safeParse(block.data).success) throw new Error("invalid image data");
 					validatePng(Buffer.from(block.data, "base64"), this.logger);
 					const imageId = imageIdentity(block.data);
-					this.imageSources.set(imageId, block.data);
+					this.imageSources.set(imageId, `data:image/png;base64,${block.data}`);
 					if (!imageIds.includes(imageId)) imageIds.push(imageId);
 				} catch {
 					blocks.push({ kind: "text", text: "[图片附件暂不支持预览]" });
@@ -550,9 +584,44 @@ export class SessionAdapter {
 		}
 	}
 
-	private outputView(content: Array<{ type: string; text?: string }>): Pick<ToolActivity, "output" | "truncated"> {
-		const text = content.map((block) => (block.type === "text" ? (block.text ?? "") : "[非文本结果]")).join("\n");
-		return { output: text.slice(-262144), truncated: text.length > 262144 };
+	/*
+	 * ========================================================================
+	 * 步骤7：保留工具已返回图片的内容身份
+	 * ========================================================================
+	 * 数据源：SDK 工具结果与原生历史中的图片块，不重新读取文件路径。
+	 * 操作：1) 快照只携带图片摘要；2) 图片在会话内按需读取，保留 PNG/JPEG/GIF/WebP。
+	 */
+	private outputView(
+		content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>,
+	): Pick<ToolActivity, "output" | "truncated" | "imageIds"> {
+		this.logger.info("开始映射工具结果与图片引用");
+		try {
+			// 7.1 验证格式与负载边界，不把 base64 混入工具文本或跨进程快照。
+			const imageIds: string[] = [];
+			for (const block of content) {
+				if (
+					block.type !== "image" ||
+					!TOOL_IMAGE_MIME_TYPES.includes(block.mimeType ?? "") ||
+					imageIds.length >= TOOL_IMAGE_COUNT_LIMIT ||
+					!toolImageDataSchema.safeParse(block.data).success
+				)
+					continue;
+				const data = block.data;
+				if (!data) continue;
+				const imageId = imageIdentity(data);
+				this.imageSources.set(imageId, `data:${block.mimeType};base64,${data}`);
+				imageIds.push(imageId);
+			}
+			// 7.2 文字继续保留，纯图片结果交给缩略图步骤展示。
+			const text = content.map((block) => (block.type === "text" ? (block.text ?? "") : "[非文本结果]")).join("\n");
+			return {
+				output: text.slice(-262144),
+				truncated: text.length > 262144,
+				imageIds: imageIds.length ? imageIds : undefined,
+			};
+		} finally {
+			this.logger.info("工具结果与图片引用映射结束");
+		}
 	}
 
 	private argumentsText(value: unknown): string {
