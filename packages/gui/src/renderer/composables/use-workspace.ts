@@ -1,7 +1,7 @@
 import { nextTick, onMounted, onScopeDispose, ref, shallowRef } from "vue";
-import { GuiController } from "../../domain/gui-controller.ts";
+import { SessionControllers } from "../../domain/session-controllers.ts";
 import { createLogger } from "../../shared/logger.ts";
-import type { ProjectSummary, SessionChange, SessionLibrary } from "../../shared/workspace.ts";
+import type { ProjectSummary, SessionChange, SessionLibrary, SessionRuntime } from "../../shared/workspace.ts";
 
 const logger = createLogger("renderer");
 
@@ -17,13 +17,20 @@ const logger = createLogger("renderer");
 export function useWorkspace() {
 	logger.info("开始绑定 Vue 工作区");
 	const bridge = window.piDesktop;
-	const controller = new GuiController(bridge, logger, bridge);
+	const controller = new SessionControllers(bridge, logger, bridge);
 	const state = shallowRef(controller.value);
 	const changing = ref(false);
 	const actionError = ref("");
 	const library = shallowRef<SessionLibrary | null>(null);
 	const projects = shallowRef<ProjectSummary[]>([]);
+	const sessionRuntimes = shallowRef<SessionRuntime[]>([]);
 	let libraryRequest = 0;
+	const releaseRuntimes = bridge.subscribe((notification) => {
+		if (notification.type !== "sessions") return;
+		sessionRuntimes.value = notification.sessions;
+		void refreshLibrary();
+		void refreshProjects();
+	});
 	const unsubscribe = controller.subscribe((next) => {
 		const previous = state.value.snapshot;
 		state.value = next;
@@ -66,7 +73,13 @@ export function useWorkspace() {
 		try {
 			// 6.1 等待真实初始状态，避免启动页结束后露出空会话。
 			await controller.connect();
-			await Promise.all([refreshLibrary(), refreshProjects()]);
+			await Promise.all([
+				refreshLibrary(),
+				refreshProjects(),
+				bridge.getSessionRuntimes().then((value) => {
+					sessionRuntimes.value = value;
+				}),
+			]);
 		} finally {
 			await nextTick();
 			// 6.2 主窗口在交接前保持隐藏，不能依赖被暂停的 requestAnimationFrame。
@@ -76,6 +89,7 @@ export function useWorkspace() {
 	});
 	onScopeDispose(() => {
 		unsubscribe();
+		releaseRuntimes();
 		controller.dispose();
 	});
 	// 1.1 项目切换是桌面能力；完成后仍用标准快照同步业务状态。
@@ -190,6 +204,7 @@ export function useWorkspace() {
 		changeProject,
 		library,
 		projects,
+		sessionRuntimes,
 		refreshLibrary,
 		refreshProjects,
 		openWorkspace,

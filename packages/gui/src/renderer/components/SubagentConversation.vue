@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { parseSubagentTranscript } from "../../shared/subagent-transcript.ts";
+import { parseSubagentInspection, parseSubagentTranscript } from "../../shared/subagent-transcript.ts";
+import type { SubagentInspection } from "../../shared/subagents.ts";
 import { toChatView } from "../adapters/chat-view.ts";
 import { UChatMessages } from "../ui.ts";
 import MarkdownBlock from "./MarkdownBlock.vue";
@@ -8,9 +9,16 @@ import ThinkingBlock from "./ThinkingBlock.vue";
 import ToolActivityBlock from "./ToolActivityBlock.vue";
 import TurnHeader from "./TurnHeader.vue";
 
-const props = defineProps<{ transcript: string; running?: boolean }>();
+const props = defineProps<{ transcript: string | null; inspection: SubagentInspection | null; running?: boolean }>();
 const expandedTurns = ref(new Set<string>());
-const parsed = computed(() => parseSubagentTranscript(props.transcript));
+const parsed = computed(() => {
+	const record = parseSubagentTranscript(props.transcript ?? "");
+	// 1.2 终态转录缺少工具结束记录时，显示未完成而非继续转圈。
+	if (!props.running) for (const tool of record.tools) if (tool.state === "running") tool.state = "interrupted";
+	return record.messages.length || record.tools.length || !props.inspection
+		? record
+		: parseSubagentInspection(props.inspection);
+});
 const messages = computed(() =>
 	toChatView(parsed.value.messages.slice(-300), parsed.value.tools.slice(-500), {
 		running: props.running === true,

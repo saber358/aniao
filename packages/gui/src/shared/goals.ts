@@ -3,6 +3,7 @@ import { z } from "zod";
 export const goalStatusSchema = z.enum(["running", "idle", "paused", "blocked", "budget_limited", "complete"]);
 
 export const goalTaskStatusSchema = z.enum(["pending", "complete", "skipped"]);
+export const goalActionSchema = z.enum(["pause", "resume", "delete"]);
 
 export const goalTaskViewSchema = z.object({
 	id: z.string().min(1).max(200),
@@ -39,6 +40,7 @@ export const goalViewSchema = z.object({
 	pauseReason: z.string().max(8000).optional(),
 	activePath: z.string().max(1000).optional(),
 	updatedAt: z.string().max(100).optional(),
+	truncated: z.boolean().optional(),
 });
 
 export const goalSnapshotSchema = z.object({
@@ -47,7 +49,11 @@ export const goalSnapshotSchema = z.object({
 });
 
 export const goalReadRequestSchema = z
-	.object({ cwd: z.string().min(1).max(4096), sessionId: z.string().min(1).max(200) })
+	.object({
+		cwd: z.string().min(1).max(4096),
+		sessionId: z.string().min(1).max(200),
+		generation: z.string().min(1).max(4096),
+	})
 	.strict();
 
 export type GoalStatus = z.infer<typeof goalStatusSchema>;
@@ -55,3 +61,5 @@ export type GoalTaskStatus = z.infer<typeof goalTaskStatusSchema>;
 export type GoalTaskView = z.infer<typeof goalTaskViewSchema>;
 export type GoalView = z.infer<typeof goalViewSchema>;
 export type GoalSnapshot = z.infer<typeof goalSnapshotSchema>;
+export type GoalAction = z.infer<typeof goalActionSchema>;
+export type GoalReadRequest = z.infer<typeof goalReadRequestSchema>;

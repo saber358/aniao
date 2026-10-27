@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added concurrent ordinary sessions with retained SDK hosts, independent controllers and drafts, per-session running/attention indicators, and direct navigation back from plugin or automation pages while tasks continue.
+
 - Added anonymous feedback with optional images, explicit submission, bounded requests and preserved input after failures or closing the dialog; no account or token is required.
 - Added a plugin manager for Pi packages: installed package list, curated community catalog, npm/Git/local installation and removal through the Pi package manager, plus built-in capability overview.
 - Added a native goal dashboard above the composer for `pi-goal-x`: live status, task progress, current task, completion contract, usage, pause reason, expandable task tree, and pause/resume/delete controls routed through the plugin commands.
@@ -89,6 +91,10 @@
 - Application updates now require an explicit download click from the sidebar, General Settings, or Help; automatic checks only fetch metadata, and all three entry points share progress and retry state.
 
 ### Fixed
+
+- Fixed goal dashboard session isolation and startup recovery by reading the active branch focus through the SDK host and the plugin's structured `get_goal` interface; support external goal pools, configured control aliases, confirmation-bound request lifetimes, accurate lifecycle states, bounded text and visible retryable failures.
+
+- Fixed empty subagent detail tabs by connecting the official inspection protocol, resolving child transcript identities, preserving successful reads across partial failures, and exposing retryable errors; also fixed unrelated widget cleanup, cancelled subagent waits and oversized output replies.
 
 - Mutate queued messages by stable identity without replaying the live queue; reject consumed targets and late input callbacks, preserve write-ahead order, and keep edited attachments consistent with recovery.
 - Restore the idle queue's recover-to-draft and clear controls, and retain edited text until the host confirms the change.

@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 export const SUBAGENT_STATUS_PREFIX = "PI_SUBAGENT_ASYNC_JSON:";
+export const SUBAGENT_INSPECT_PREFIX = "PI_SUBAGENT_INSPECT_JSON:";
+export const SUBAGENT_INSPECT_WIDGET = "subagent-inspect";
 const subagentIdSchema = z
 	.string()
 	.min(1)
@@ -8,7 +10,15 @@ const subagentIdSchema = z
 	.regex(/^[A-Za-z0-9_-]+$/u);
 
 export const subagentOutputRequestSchema = z
-	.object({ runId: subagentIdSchema, childId: subagentIdSchema.optional() })
+	.object({
+		runId: subagentIdSchema,
+		childId: z
+			.string()
+			.min(1)
+			.max(256)
+			.regex(/^(?!-)[^\s\p{Cc}]+$/u)
+			.optional(),
+	})
 	.strict();
 
 const subagentStateSchema = z.enum([
@@ -21,6 +31,48 @@ const subagentStateSchema = z.enum([
 	"stopped",
 	"rejected",
 ]);
+
+/*
+ * ========================================================================
+ * 步骤1：校验插件官方详情回复
+ * ========================================================================
+ * 数据源：pi-subagents.inspect-reply v1，不接受文件路径或终端组件。
+ * 操作：1) 保留任务、消息和实际模型；2) 限制字段与消息数量。
+ */
+export const subagentInspectionSchema = z.object({
+	kind: z.literal("pi-subagents.inspect-reply"),
+	version: z.literal(1),
+	requestId: z.string().min(1).max(64),
+	asyncId: z.string().min(1).max(256).optional(),
+	childId: z.string().min(1).max(256).optional(),
+	status: subagentStateSchema.optional(),
+	label: z.string().max(160).optional(),
+	task: z.string().max(2000).optional(),
+	messages: z
+		.array(
+			z.object({
+				role: z.string().max(64),
+				kind: z.enum(["text", "toolCall", "toolResult"]),
+				text: z.string().max(1000),
+				name: z.string().max(160).optional(),
+				isError: z.boolean().optional(),
+			}),
+		)
+		.max(200)
+		.optional(),
+	finalOutput: z.string().max(8000).optional(),
+	resolvedModel: z.object({ provider: z.string().max(64), model: z.string().max(160) }).optional(),
+	truncated: z
+		.object({ task: z.boolean(), messages: z.number().int().nonnegative(), finalOutput: z.boolean() })
+		.optional(),
+	error: z
+		.object({
+			code: z.enum(["invalid_request", "not_found", "foreign_session", "stale", "no_active_session", "internal"]),
+			message: z.string().max(4096),
+		})
+		.optional(),
+});
+export type SubagentInspection = z.infer<typeof subagentInspectionSchema>;
 
 const subagentActivitySchema = z
 	.object({

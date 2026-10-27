@@ -45,7 +45,7 @@ StartupWindow 在桌面服务初始化前加载独立的 `startup.html` 与 `sta
 
 准备阶段与可取消的 SDK 运行分开。准备失败不产生 agent_settled，宿主主动恢复空闲。运行中的停止先请求取消，再等待收束。空闲取消不改变状态；旧代次命令被拒绝。纯文本发送被接受后只清理原草稿一次，用户随后输入的相同文本也不会被清除。
 
-GUI 每个 profile 只启动一个应用实例，前台只保持一个活动会话宿主，后台调度另有最多两个独立宿主。切换时短暂创建一个待接替宿主，准备成功后关闭原宿主。主进程阻止在途操作与项目切换交错。Renderer 重载只释放订阅；应用退出等待所有宿主、调度器与 PTY 的关闭结果，单项保存失败不跳过其他回收。宿主有 5 秒收束时间，随后终结受管进程。宿主异常后保留展示与草稿，用户重新打开项目恢复 JSONL，不自动重放 prompt。
+GUI 每个 profile 只启动一个应用实例，WorkspaceService 按会话保留独立宿主，多个普通会话可以同时运行；后台调度仍有独立的两个并发名额。切换只改变当前选择，返回已有会话复用相同宿主代次，不关闭原任务。SessionControllers 按 sessionId/generation 保存独立 GuiController，命令、消息、队列和草稿各自归属原会话。跨会话事件携带身份，故障只断开对应会话；侧栏接收有界运行摘要。Renderer 重载只释放订阅；应用退出等待所有宿主、调度器与 PTY 的关闭结果，单项保存失败不跳过其他回收。宿主有 5 秒收束时间，随后终结受管进程。宿主异常后保留展示与草稿，用户重新打开会话恢复 JSONL，不自动重放 prompt。详见 [多会话运行](docs/multi-session.md)。
 
 WorkspaceService 负责会话切换与组织操作互斥，新宿主初始化失败时保留旧宿主。历史选择携带来源宿主身份，项目切换后迟到的选择被拒绝。SessionLibrary 用 SDK 发现当前 cwd 的历史，只向 Renderer 返回摘要和 ID，不传原生会话文件路径。重命名写入 SDK，置顶与归档由桌面保存。
 
@@ -75,9 +75,9 @@ Controller 将图片 ID 纳入同一草稿修订与串行保存。图片发送�
 
 分支选择经 WorkspacePort 携带 sessionId、generation 与原生 entryId。SessionAdapter 按 SDK 消息对象身份关联原生 entry，不用正文、显示 ID 或数组位置推测；message_end 早于 SDK 持久化，入口在任务收束后补全。只开放当前上下文中已有助手前缀、非空、纯文本且不超过草稿上限的用户消息，保证新 JSONL 可以立即恢复。
 
-待接替宿主先读取来源 SessionManager，再对选中 entry 的 parentId 调用 SDK `createBranchedSession`，最后用共享运行时工厂初始化新会话。SDK 在恢复缺少思考配置的旧文件时可能补写元数据，因此不先初始化来源运行时。切换和分支前先请求来源宿主调用 session_before_switch / session_before_fork；扩展返回 cancel 时不建立替代宿主。初始化失败时新原生分支文件保留，原活动宿主不变。
+新分支宿主先读取来源 SessionManager，再对选中 entry 的 parentId 调用 SDK `createBranchedSession`，最后用共享运行时工厂初始化新会话。SDK 在恢复缺少思考配置的旧文件时可能补写元数据，因此不先初始化来源运行时。分支前请求来源空闲宿主调用 session_before_fork，扩展返回 cancel 时不建立新宿主；普通导航不触发原运行时的切换或关闭回调。初始化失败时新原生分支文件保留，原活动宿主不变。
 
-宿主 ready 只额外返回受限的初始草稿，不污染 AgentPort 快照。WorkspaceService 核对新会话身份、持久化状态和 parentId，先保存草稿，再更新活动索引，最后关闭旧宿主。保存失败保留原会话；新文件与已保存草稿供后续恢复，不做跨文件事务或自动删除。来源路径在 SessionLibrary 内转成当前项目会话 ID，界面只展示可查证的来源链接。新分支不自动发送，也不继承来源草稿或待处理队列。
+宿主 ready 只额外返回受限的初始草稿，不污染 AgentPort 快照。WorkspaceService 核对新会话身份、持久化状态和 parentId，先保存草稿，再更新活动索引；原宿主继续保留。保存失败保留原会话；新文件与已保存草稿供后续恢复，不做跨文件事务或自动删除。来源路径在 SessionLibrary 内转成当前项目会话 ID，界面只展示可查证的来源链接。新分支不自动发送，也不继承来源草稿或待处理队列。
 
 WorkspaceStore 用串行读改写和临时文件同步后替换保存索引与草稿。草稿文件按 cwd 与会话 ID 的摘要定位，并检查修订；损坏文件保留原文且拒绝覆盖。Controller 合并在途保存后的后续编辑，保存失败阻止切换。SDK 首个助手消息前不会落盘，未发送会话由索引保留 ID，恢复时用相同 ID 重建空会话；已落盘历史缺失时拒绝伪装为空会话。
 

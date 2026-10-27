@@ -32,7 +32,7 @@ import {
 } from "../shared/protocol.ts";
 import { scheduleCreateSchema, scheduleIdSchema, schedulePauseSchema } from "../shared/schedule.ts";
 import { STARTUP_CHANNELS } from "../shared/startup.ts";
-import { subagentOutputRequestSchema } from "../shared/subagents.ts";
+import { subagentInspectionSchema, subagentOutputRequestSchema } from "../shared/subagents.ts";
 import {
 	terminalCloseSchema,
 	terminalCreateSchema,
@@ -56,7 +56,9 @@ import {
 	projectSummarySchema,
 	sessionAtSchema,
 	sessionChangeSchema,
+	sessionIdentitySchema,
 	sessionIdSchema,
+	sessionRuntimeSchema,
 	workspacePathSchema,
 	workspaceRenameSchema,
 } from "../shared/workspace.ts";
@@ -76,6 +78,15 @@ logger.info("开始安装桌面业务桥");
 const bridge: DesktopBridge = {
 	// 1.1 快照和事件从 unknown 校验，不能把宿主对象直接带入页面。
 	getSnapshot: async () => snapshotSchema.nullable().parse(await ipcRenderer.invoke(IPC_CHANNELS.snapshot)),
+	getSessionSnapshot: async (identity) =>
+		snapshotSchema
+			.nullable()
+			.parse(await ipcRenderer.invoke(IPC_CHANNELS.sessionSnapshot, sessionIdentitySchema.parse(identity))),
+	getSessionRuntimes: async () =>
+		sessionRuntimeSchema
+			.array()
+			.max(20000)
+			.parse(await ipcRenderer.invoke(IPC_CHANNELS.sessionRuntimes)),
 	dispatch: async (command) => {
 		// 1.2 Zod 已校验；再做一次 JSON 归一化，避免 Vue reactive Proxy 进入 structured clone。
 		const envelope = JSON.parse(JSON.stringify(commandEnvelopeSchema.parse(command))) as unknown;
@@ -123,15 +134,23 @@ const bridge: DesktopBridge = {
 		const value = await ipcRenderer.invoke(IPC_CHANNELS.subagentOutput, input);
 		return typeof value === "string" ? value : null;
 	},
+	inspectSubagent: async (runId, childId) => {
+		logger.info("开始请求子智能体详情");
+		try {
+			// 1.7 官方详情使用统一目标校验和结构化回复，不把路径暴露给页面。
+			const input = subagentOutputRequestSchema.parse({ runId, childId });
+			return subagentInspectionSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.subagentInspection, input));
+		} finally {
+			logger.info("子智能体详情请求结束");
+		}
+	},
 	readSubagentTranscript: async (runId, childId) => {
 		const input = subagentOutputRequestSchema.parse({ runId, ...(childId ? { childId } : {}) });
 		const value = await ipcRenderer.invoke(IPC_CHANNELS.subagentTranscript, input);
 		return typeof value === "string" ? value : null;
 	},
-	readGoals: async (cwd, sessionId) =>
-		goalSnapshotSchema.parse(
-			await ipcRenderer.invoke(IPC_CHANNELS.goalsRead, goalReadRequestSchema.parse({ cwd, sessionId })),
-		),
+	readGoals: async (request) =>
+		goalSnapshotSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.goalsRead, goalReadRequestSchema.parse(request))),
 	// 1.5 编辑命令只携带固定动作，系统剪贴板内容不经过业务桥。
 	edit: async (action) => {
 		await ipcRenderer.invoke(IPC_CHANNELS.edit, editActionSchema.parse(action));

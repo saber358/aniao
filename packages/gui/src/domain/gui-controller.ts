@@ -193,6 +193,7 @@ export class GuiController {
 
 	private receive(notification: PortNotification): void {
 		if (this.disposed) return;
+		if (notification.type === "sessions") return;
 		// 1.3 连接故障独立于运行结果；保留草稿供用户核对。
 		if (notification.type === "disconnected") {
 			this.publish({ connection: "disconnected", error: notification.reason });

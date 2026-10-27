@@ -54,7 +54,7 @@ class Host extends FakeAgentPort implements ManagedHost {
  * ========================================================================
  * 数据源：可控宿主与真实桌面索引文件。
  * 操作：
- *   1) 失败不关闭旧宿主，忙碌时不切换
+ *   1) 切换保留旧宿主，只有分支与资源修改检查忙碌状态
  *   2) 未发送会话保留身份和草稿，未知 ID 无法读取
  */
 describe("WorkspaceService", () => {
@@ -148,6 +148,7 @@ describe("WorkspaceService", () => {
 		const factory = vi.fn(() => host);
 		const workspace = new WorkspaceService(new WorkspaceStore(join(directory, "state"), logger), factory, logger);
 		await workspace.attach(directory);
+		host.current.messages = [{ id: "user", role: "user", blocks: [], forkEntryId: "fork-entry" }];
 		let release = () => {};
 		let enter = () => {};
 		const entered = new Promise<void>((resolve) => {
@@ -161,7 +162,9 @@ describe("WorkspaceService", () => {
 				}),
 		);
 		try {
-			const changing = expect(workspace.newSession()).rejects.toThrow("工作区已关闭");
+			const changing = expect(
+				workspace.forkSession({ sessionId: "current", generation: host.current.generation, entryId: "fork-entry" }),
+			).rejects.toThrow("工作区已关闭");
 			await entered;
 			await workspace.close();
 			release();
@@ -174,7 +177,7 @@ describe("WorkspaceService", () => {
 			logger.info("退出取消待处理切换验证完成");
 		}
 	});
-	it("keeps the current host when an extension vetoes a switch and permits dialog replies during the hook", async () => {
+	it("keeps the source when an extension vetoes a fork and permits dialog replies during the hook", async () => {
 		logger.info("开始验证扩展切换取消");
 		const directory = await mkdtemp(join(tmpdir(), "pi-gui-workspace-"));
 		directories.push(directory);
@@ -182,6 +185,7 @@ describe("WorkspaceService", () => {
 		const factory = vi.fn(() => host);
 		const workspace = new WorkspaceService(new WorkspaceStore(join(directory, "state"), logger), factory, logger);
 		await workspace.attach(directory);
+		host.current.messages = [{ id: "user", role: "user", blocks: [], forkEntryId: "fork-entry" }];
 		vi.spyOn(host, "prepareTransition").mockImplementationOnce(async () => {
 			await workspace.dispatch({
 				requestId: "reply",
@@ -192,7 +196,9 @@ describe("WorkspaceService", () => {
 			throw new Error("扩展已取消会话切换");
 		});
 		try {
-			await expect(workspace.newSession()).rejects.toThrow("扩展已取消");
+			await expect(
+				workspace.forkSession({ sessionId: "current", generation: host.current.generation, entryId: "fork-entry" }),
+			).rejects.toThrow("扩展已取消");
 			expect(factory).toHaveBeenCalledTimes(1);
 			expect(host.isClosed).toBe(false);
 			expect(host.commands).toHaveLength(1);
@@ -401,7 +407,8 @@ describe("WorkspaceService", () => {
 		expect((await workspace.getLibrary())?.sessions.map((item) => item.id).sort()).toEqual(["session-1", "session-2"]);
 		await workspace.openSession("session-1");
 		expect(await workspace.loadDraft("session-1")).toEqual({ text: "第一份草稿", revision: 1 });
-		await expect(workspace.loadDraft("session-2")).rejects.toThrow("当前会话");
+		expect(await workspace.loadDraft("session-2")).toEqual({ text: "第二份草稿", revision: 1 });
+		await expect(workspace.loadDraft("unknown")).rejects.toThrow("已打开会话");
 		await expect(workspace.openSession("unknown")).rejects.toThrow("当前项目");
 		await workspace.updateSession({ sessionId: "session-1", pinned: true, archived: true });
 		await workspace.close();
@@ -416,13 +423,14 @@ describe("WorkspaceService", () => {
 		logger.info("未发送会话恢复验证完成");
 	});
 
-	it("preserves the existing host if the replacement fails and rejects switching while running", async () => {
+	it("preserves the existing host on startup failure and permits creating another while running", async () => {
 		const directory = await mkdtemp(join(tmpdir(), "pi-gui-workspace-"));
 		directories.push(directory);
 		const current = new Host(await realpath(directory), "current");
 		const broken = new Host(current.current.cwd, "broken");
 		vi.spyOn(broken, "getSnapshot").mockRejectedValue(new Error("startup failed"));
-		const factory = vi.fn().mockReturnValueOnce(current).mockReturnValueOnce(broken);
+		const another = new Host(current.current.cwd, "another");
+		const factory = vi.fn().mockReturnValueOnce(current).mockReturnValueOnce(broken).mockReturnValueOnce(another);
 		const workspace = new WorkspaceService(new WorkspaceStore(join(directory, "state"), logger), factory, logger);
 		await workspace.attach(directory);
 		await expect(workspace.newSession()).rejects.toThrow("startup failed");
@@ -430,8 +438,10 @@ describe("WorkspaceService", () => {
 		expect(broken.isClosed).toBe(true);
 		expect((await workspace.getSnapshot())?.sessionId).toBe("current");
 		current.current.run.phase = "working";
-		await expect(workspace.newSession()).rejects.toThrow("停止当前任务");
-		expect(factory).toHaveBeenCalledTimes(2);
+		await workspace.newSession();
+		expect((await workspace.getSnapshot())?.sessionId).toBe("another");
+		expect(current.isClosed).toBe(false);
+		expect(factory).toHaveBeenCalledTimes(3);
 		await workspace.close();
 	});
 

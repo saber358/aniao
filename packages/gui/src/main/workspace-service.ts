@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
+import type { GoalReadRequest, GoalSnapshot } from "../shared/goals.ts";
 import type { ImageImport, ImageRead } from "../shared/images.ts";
 import type { Logger } from "../shared/logger.ts";
 import type { PluginPackage, PluginScope } from "../shared/plugins.ts";
@@ -11,14 +12,17 @@ import type {
 	ProjectFileSelection,
 } from "../shared/project-files.ts";
 import type { AgentPort, CommandEnvelope, PortNotification, SessionSnapshot } from "../shared/protocol.ts";
+import type { SubagentInspection } from "../shared/subagents.ts";
 import type {
 	Draft,
 	DraftWrite,
 	ForkSelection,
 	ProjectSummary,
 	SessionChange,
+	SessionIdentity,
 	SessionItem,
 	SessionLibrary,
+	SessionRuntime,
 	SessionSummary,
 	SessionTarget,
 } from "../shared/workspace.ts";
@@ -41,7 +45,19 @@ export interface ManagedHost extends AgentPort {
 	removePlugin?(source: string, scope: PluginScope): Promise<PluginPackage[]>;
 	readSubagentOutput?(runId: string, childId?: string): Promise<string | null>;
 	readSubagentTranscript?(runId: string, childId?: string): Promise<string | null>;
+	inspectSubagent?(runId: string, childId?: string): Promise<SubagentInspection>;
+	readGoals?(request: GoalReadRequest): Promise<GoalSnapshot>;
 	close(): Promise<void>;
+}
+
+interface HostedSession {
+	host: ManagedHost;
+	runtime: SessionRuntime;
+	phase: SessionSnapshot["run"]["phase"];
+	pending: number;
+	dialogs: boolean;
+	failed: boolean;
+	release: () => void;
 }
 
 /*
@@ -60,9 +76,12 @@ export class WorkspaceService {
 	private host: ManagedHost | null = null;
 	private nextHost?: ManagedHost;
 	private closed = false;
-	private releaseHost?: () => void;
+	private readonly hosts = new Map<ManagedHost, HostedSession>();
+	private readonly recentHosts = new Map<string, ManagedHost>();
 	private changing = false;
-	private pendingCommands = 0;
+	private get pendingCommands(): number {
+		return this.host ? (this.hosts.get(this.host)?.pending ?? 0) : 0;
+	}
 	private fileSearch?: AbortController;
 	private readonly listeners = new Set<(event: PortNotification) => void>();
 
@@ -98,25 +117,37 @@ export class WorkspaceService {
 
 	async attach(cwd: string, target: SessionTarget = { type: "recent" }, expectedHost = this.host): Promise<void> {
 		if (this.closed) throw new Error("桌面工作区已关闭");
-		if (this.changing || this.pendingCommands > 0) throw new Error("请等待当前操作结束");
+		if (this.changing) throw new Error("请等待当前操作结束");
 		if (this.host !== expectedHost) throw new Error("工作区已切换，请重新选择会话");
 		this.fileSearch?.abort();
 		this.changing = true;
 		this.logger.info("开始切换工作区会话");
 		try {
-			// 1.1 SDK 未收束前不替换活动宿主。
-			if (this.host && !this.host.isClosed && (await this.host.getSnapshot()).run.phase !== "idle")
-				throw new Error("请先停止当前任务");
+			// 1.1 导航不替换运行时；只有分支需要来源会话的生命周期检查。
+			if (target.type === "fork" && this.host && !this.host.isClosed) {
+				if ((await this.host.getSnapshot()).run.phase !== "idle") throw new Error("请先停止当前任务再创建分支");
+				await this.host.prepareTransition(target);
+			}
 			if (this.host && !this.host.isClosed) await this.getLibrary();
-			if (this.host && !this.host.isClosed) await this.host.prepareTransition(target);
 			if (this.closed) throw new Error("桌面工作区已关闭");
 			const normalized = await realpath(cwd);
 			if (!(await stat(normalized)).isDirectory()) throw new Error("项目目录已失效");
 			if (this.closed) throw new Error("桌面工作区已关闭");
-			const next = this.createHost(normalized, target);
+			const retained =
+				target.type === "session"
+					? [...this.hosts.values()].find(
+							(entry) =>
+								entry.runtime.cwd === normalized && entry.runtime.sessionId === target.id && !entry.host.isClosed,
+						)?.host
+					: target.type === "recent"
+						? this.recentHosts.get(normalized)
+						: undefined;
+			const next = retained && !retained.isClosed ? retained : this.createHost(normalized, target);
+			const created = next !== retained;
 			this.nextHost = next;
+			let current: SessionSnapshot;
 			try {
-				const current = await next.getSnapshot();
+				current = await next.getSnapshot();
 				const entries = await next.listSessions();
 				const summary = entries.find((item) => item.id === current.sessionId);
 				if (this.closed || next.isClosed) throw new Error("桌面工作区已关闭");
@@ -132,19 +163,18 @@ export class WorkspaceService {
 				await this.store.rememberSessions(normalized, entries);
 				await this.store.remember(normalized, { ...summary, pinned: false, archived: false }, true);
 			} catch (error) {
-				await next.close();
+				if (created) await next.close();
 				throw error;
 			}
-			this.releaseHost?.();
-			await this.host?.close();
 			if (this.closed) {
-				await next.close();
+				if (created) await next.close();
 				throw new Error("桌面工作区已关闭");
 			}
+			// 1.2 每个会话只持有一个宿主；恢复已有会话直接复用，不重启其任务或 Goal。
+			if (!this.hosts.has(next)) this.trackHost(next, current);
 			this.host = next;
-			this.releaseHost = next.subscribe((event) => {
-				for (const listener of this.listeners) listener(event);
-			});
+			this.recentHosts.set(normalized, next);
+			this.publishRuntimes();
 		} finally {
 			this.nextHost = undefined;
 			this.changing = false;
@@ -154,6 +184,115 @@ export class WorkspaceService {
 
 	async getSnapshot(): Promise<SessionSnapshot | null> {
 		return this.host ? this.host.getSnapshot() : null;
+	}
+
+	/*
+	 * ========================================================================
+	 * 步骤8：保留独立会话宿主并按身份路由事件
+	 * ========================================================================
+	 * 数据源：每个 utilityProcess 的会话身份、运行阶段与交互事件。
+	 * 操作：1) 所有会话持续更新，前端按身份订阅；2) 后台退出只标记对应会话。
+	 */
+	private trackHost(host: ManagedHost, snapshot: SessionSnapshot): void {
+		this.logger.info("开始登记独立会话宿主");
+		try {
+			for (const previous of this.hosts.values()) {
+				if (
+					previous.host.isClosed &&
+					previous.runtime.cwd === snapshot.cwd &&
+					previous.runtime.sessionId === snapshot.sessionId
+				) {
+					previous.release();
+					this.hosts.delete(previous.host);
+				}
+			}
+			// 8.1 只缓存导航所需状态；完整消息由各会话自己的 SDK 和 Controller 持有。
+			const entry: HostedSession = {
+				host,
+				pending: 0,
+				dialogs: snapshot.dialogs.length > 0,
+				failed: snapshot.messages.at(-1)?.error !== undefined,
+				phase: snapshot.run.phase,
+				release: () => {},
+				runtime: {
+					cwd: snapshot.cwd,
+					sessionId: snapshot.sessionId,
+					generation: snapshot.generation,
+					title: snapshot.title,
+					running: snapshot.run.phase !== "idle",
+					attention: snapshot.dialogs.length > 0 || snapshot.messages.at(-1)?.error !== undefined,
+					connected: true,
+				},
+			};
+			this.hosts.set(host, entry);
+			entry.release = host.subscribe((notification) => {
+				if (this.closed) return;
+				let update = false;
+				if (notification.type === "disconnected") {
+					entry.runtime = { ...entry.runtime, connected: false, running: false, attention: true };
+					notification = { ...notification, sessionId: entry.runtime.sessionId, generation: entry.runtime.generation };
+					update = true;
+				} else if (notification.type === "event") {
+					if (
+						notification.value.sessionId !== entry.runtime.sessionId ||
+						notification.value.generation !== entry.runtime.generation
+					)
+						return;
+					const event = notification.value.event;
+					if (event.type === "run") {
+						entry.phase = event.run.phase;
+						if (entry.phase === "preparing") entry.failed = false;
+						entry.runtime = {
+							...entry.runtime,
+							running: entry.phase !== "idle" || entry.pending > 0,
+							attention: entry.dialogs || entry.failed,
+						};
+						update = true;
+					} else if (event.type === "dialogs") {
+						entry.dialogs = event.dialogs.length > 0;
+						entry.runtime = { ...entry.runtime, attention: entry.dialogs || entry.failed };
+						update = true;
+					} else if (event.type === "title") {
+						entry.runtime = { ...entry.runtime, title: event.title };
+						update = true;
+					} else if (event.type === "message" && event.message.error) {
+						entry.failed = true;
+						entry.runtime = { ...entry.runtime, attention: true };
+						update = true;
+					}
+				}
+				for (const listener of this.listeners) listener(notification);
+				if (update) this.publishRuntimes();
+			});
+		} finally {
+			this.logger.info("独立会话宿主登记结束");
+		}
+	}
+
+	getSessionRuntimes(): SessionRuntime[] {
+		return [...this.hosts.values()].map((entry) => ({
+			...entry.runtime,
+			connected: !entry.host.isClosed && entry.runtime.connected,
+		}));
+	}
+
+	private publishRuntimes(): void {
+		const notification: PortNotification = { type: "sessions", sessions: this.getSessionRuntimes() };
+		for (const listener of this.listeners) listener(notification);
+	}
+
+	async getSessionSnapshot(identity: SessionIdentity): Promise<SessionSnapshot | null> {
+		this.logger.info("开始读取指定会话快照");
+		try {
+			// 8.2 只接受本次应用持有的宿主身份，不允许用会话 ID 打开任意磁盘路径。
+			const entry = [...this.hosts.values()].find(
+				(entry) => entry.runtime.sessionId === identity.sessionId && entry.runtime.generation === identity.generation,
+			);
+			if (!entry || entry.host.isClosed) throw new Error("会话宿主已退出，请重新打开该会话");
+			return await entry.host.getSnapshot();
+		} finally {
+			this.logger.info("指定会话快照读取结束");
+		}
 	}
 
 	/*
@@ -198,6 +337,26 @@ export class WorkspaceService {
 		if (!this.host?.listPlugins || this.host.isClosed) throw new Error("请先连接项目");
 		return this.host.listPlugins();
 	}
+	async readGoals(request: GoalReadRequest): Promise<GoalSnapshot> {
+		this.logger.info("开始读取工作区目标");
+		try {
+			// 1.7 不允许 Renderer 指定其他项目；切换后丢弃旧宿主回复。
+			const host = this.host;
+			if (!host?.readGoals || host.isClosed) throw new Error("请先连接项目");
+			const snapshot = await host.getSnapshot();
+			if (
+				snapshot.cwd !== request.cwd ||
+				snapshot.sessionId !== request.sessionId ||
+				snapshot.generation !== request.generation
+			)
+				throw new Error("会话已更换，请刷新目标状态");
+			const value = await host.readGoals(request);
+			if (host !== this.host || host.isClosed) throw new Error("会话已更换，请刷新目标状态");
+			return value;
+		} finally {
+			this.logger.info("工作区目标读取结束");
+		}
+	}
 
 	async installPlugin(source: string): Promise<PluginPackage[]> {
 		if (!this.host?.installPlugin || this.host.isClosed) throw new Error("请先连接项目");
@@ -218,18 +377,41 @@ export class WorkspaceService {
 		if (!this.host?.readSubagentTranscript || this.host.isClosed) throw new Error("请先连接项目");
 		return this.host.readSubagentTranscript(runId, childId);
 	}
+	async inspectSubagent(runId: string, childId?: string): Promise<SubagentInspection> {
+		this.logger.info("开始读取当前会话子智能体详情");
+		try {
+			// 1.6 请求完成后再次核对宿主，拒绝切换项目后迟到的结果。
+			const host = this.host;
+			if (!host?.inspectSubagent || host.isClosed) throw new Error("请先连接项目");
+			const value = await host.inspectSubagent(runId, childId);
+			if (host !== this.host || host.isClosed) throw new Error("会话已更换，请重新打开子智能体");
+			return value;
+		} finally {
+			this.logger.info("当前会话子智能体详情读取结束");
+		}
+	}
 
 	async dispatch(envelope: CommandEnvelope): Promise<void> {
+		const entry = [...this.hosts.values()].find(
+			(entry) => entry.runtime.sessionId === envelope.sessionId && entry.runtime.generation === envelope.generation,
+		);
 		if (
-			!this.host ||
+			!entry ||
+			entry.host.isClosed ||
 			(this.changing && !["reply", "cancelLogin", "abort", "dismissNotice"].includes(envelope.command.type))
 		)
 			throw new Error("请先连接项目");
-		this.pendingCommands++;
+		entry.pending++;
 		try {
-			await this.host.dispatch(envelope);
+			// 8.3 命令从提交到完成始终绑定原宿主，切换页面不改变其归属。
+			await entry.host.dispatch(envelope);
 		} finally {
-			this.pendingCommands--;
+			entry.pending--;
+			entry.runtime = {
+				...entry.runtime,
+				running: !entry.host.isClosed && (entry.phase !== "idle" || entry.pending > 0),
+			};
+			if (!this.closed) this.publishRuntimes();
 		}
 	}
 
@@ -316,14 +498,19 @@ export class WorkspaceService {
 		if (!(await this.store.projects()).includes(cwd)) throw new Error("项目不在工作区列表中");
 		if (this.changing || this.pendingCommands > 0) throw new Error("请等待当前操作结束");
 		const snapshot = this.host && !this.host.isClosed ? await this.getSnapshot() : null;
-		if (snapshot?.cwd === cwd) {
-			if (snapshot.run.phase !== "idle") throw new Error("请先停止当前任务");
-			const host = this.host;
-			this.host = null;
-			this.releaseHost?.();
-			this.releaseHost = undefined;
-			await host?.close();
+		const entries = [...this.hosts.values()].filter((entry) => entry.runtime.cwd === cwd);
+		for (const entry of entries) {
+			if (!entry.host.isClosed && ((await entry.host.getSnapshot()).run.phase !== "idle" || entry.pending))
+				throw new Error("该工作区仍有运行中的会话，请先停止任务");
 		}
+		for (const entry of entries) {
+			entry.release();
+			await entry.host.close();
+			this.hosts.delete(entry.host);
+		}
+		if (snapshot?.cwd === cwd) this.host = null;
+		this.recentHosts.delete(cwd);
+		this.publishRuntimes();
 		await this.store.removeProject(cwd);
 	}
 
@@ -352,7 +539,7 @@ export class WorkspaceService {
 	async openSession(sessionId: string): Promise<void> {
 		const expectedHost = this.host;
 		const saved = await this.store.findSession(sessionId);
-		const current = await this.getSnapshot();
+		const current = this.host?.isClosed ? null : await this.getSnapshot();
 		if (saved && (!current || current.cwd !== saved.cwd)) {
 			await this.attach(
 				saved.cwd,
@@ -385,7 +572,7 @@ export class WorkspaceService {
 
 	async newSession(): Promise<void> {
 		const expectedHost = this.host;
-		const snapshot = await this.getSnapshot();
+		const snapshot = this.host?.isClosed ? this.hosts.get(this.host)?.runtime : await this.getSnapshot();
 		if (!snapshot) throw new Error("请先打开项目");
 		await this.attach(snapshot.cwd, { type: "new" }, expectedHost);
 	}
@@ -427,10 +614,15 @@ export class WorkspaceService {
 			const library = await this.getLibrary();
 			const entry = library?.sessions.find((item) => item.id === change.sessionId);
 			if (!library || !entry || !this.host) throw new Error("会话已不在当前项目中");
-			if ((await this.host.getSnapshot()).run.phase !== "idle") throw new Error("请等待当前任务结束");
+			const retained = [...this.hosts.values()].find(
+				(item) =>
+					item.runtime.sessionId === change.sessionId && item.runtime.cwd === library.cwd && !item.host.isClosed,
+			);
+			const owner = retained?.host ?? this.host;
+			if ((await owner.getSnapshot()).run.phase !== "idle") throw new Error("请等待该会话任务结束");
 			await this.store.remember(library.cwd, entry);
 			if (change.title && (entry.persisted || (await this.host.getSnapshot()).sessionId === entry.id))
-				await this.host.renameSession(entry.id, change.title);
+				await owner.renameSession(entry.id, change.title);
 			await this.store.update(library.cwd, change);
 		} finally {
 			this.changing = false;
@@ -608,15 +800,15 @@ export class WorkspaceService {
 	}
 
 	async loadDraft(sessionId: string): Promise<Draft> {
-		const active = await this.store.active();
-		if (!active || active.id !== sessionId) throw new Error("草稿不属于当前会话");
-		return this.store.loadDraft(active.cwd, sessionId);
+		const entry = [...this.hosts.values()].find((entry) => entry.runtime.sessionId === sessionId);
+		if (!entry) throw new Error("草稿不属于已打开会话");
+		return this.store.loadDraft(entry.runtime.cwd, sessionId);
 	}
 
 	async saveDraft(input: DraftWrite): Promise<Draft> {
-		const active = await this.store.active();
-		if (!active || active.id !== input.sessionId) throw new Error("草稿不属于当前会话");
-		return this.store.saveDraft(active.cwd, input);
+		const entry = [...this.hosts.values()].find((entry) => entry.runtime.sessionId === input.sessionId);
+		if (!entry) throw new Error("草稿不属于已打开会话");
+		return this.store.saveDraft(entry.runtime.cwd, input);
 	}
 
 	async close(): Promise<void> {
@@ -624,11 +816,15 @@ export class WorkspaceService {
 		this.closed = true;
 		try {
 			this.fileSearch?.abort();
-			this.releaseHost?.();
-			await this.nextHost?.close();
-			await this.host?.close();
+			for (const entry of this.hosts.values()) entry.release();
+			const hosts = new Set([...this.hosts.keys(), ...(this.nextHost ? [this.nextHost] : [])]);
+			const results = await Promise.allSettled([...hosts].map((host) => host.close()));
+			this.hosts.clear();
+			this.recentHosts.clear();
 			await this.store.flush();
 			this.listeners.clear();
+			if (results.some((result) => result.status === "rejected"))
+				throw new Error("部分会话保存失败，已关闭其他会话，请核对恢复记录");
 		} finally {
 			this.logger.info("桌面工作区关闭结束");
 		}

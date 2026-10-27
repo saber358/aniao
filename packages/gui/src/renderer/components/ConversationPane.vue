@@ -3,7 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import type { SessionSnapshot } from "../../shared/protocol.ts";
 import type { SubagentSnapshot } from "../../shared/subagents.ts";
 import { type ChatViewMessage, toChatView } from "../adapters/chat-view.ts";
-import { UButton, UChatMessages } from "../ui.ts";
+import { UButton, UChatMessages, UIcon } from "../ui.ts";
 import MarkdownBlock from "./MarkdownBlock.vue";
 import ThinkingBlock from "./ThinkingBlock.vue";
 import ToolActivityBlock from "./ToolActivityBlock.vue";

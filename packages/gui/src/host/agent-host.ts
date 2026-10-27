@@ -5,15 +5,18 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { CredentialStore } from "@earendil-works/pi-ai";
 import { type AgentSession, type AgentSessionRuntime, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { queueTexts } from "../domain/queue-view.ts";
+import type { GoalReadRequest, GoalSnapshot } from "../shared/goals.ts";
 import { imageBatchSchema } from "../shared/image-schema.ts";
 import type { Logger } from "../shared/logger.ts";
 import type { CommandEnvelope, Configuration, SessionSnapshot } from "../shared/protocol.ts";
 import { QUEUE_LIMIT, QUEUE_TEXT_LIMIT, type QueueItem } from "../shared/queue.ts";
+import { type SubagentInspection, subagentOutputRequestSchema } from "../shared/subagents.ts";
 import type { SessionTarget } from "../shared/workspace.ts";
 import { type ImageStore, imageIdentity } from "../storage/image-store.ts";
 import { AuthService } from "./auth-service.ts";
 import { DialogService } from "./dialog-service.ts";
 import { ExtensionUI } from "./extension-ui.ts";
+import { HostGoalService } from "./goal-service.ts";
 import { captureQueuedMessage, commitQueuedChange, commitQueuedInput, prepareQueuedInput } from "./kernel-queue.ts";
 import type { PlanJournal } from "./plan-journal.ts";
 import { readCustomProviderNames, removeCustomProvider, writeCustomProvider } from "./provider-config.ts";
@@ -57,6 +60,7 @@ export class AgentHost {
 	private readonly planJournal: PlanJournal;
 	private readonly releasePlan: () => void;
 	private customProviderNames?: Map<string, string>;
+	private readonly goals: HostGoalService;
 
 	constructor(
 		runtime: HostRuntime,
@@ -72,6 +76,7 @@ export class AgentHost {
 		this.journal = journal;
 		this.images = images;
 		this.planJournal = planJournal;
+		this.goals = new HostGoalService(runtime.session, logger);
 		logger.info("开始创建 Agent 宿主");
 		// 1.4 Windows 默认使用 PowerShell，避免仅有 WSL bash 时无法访问 Windows 路径。
 		if (process.platform === "win32") {
@@ -114,6 +119,68 @@ export class AgentHost {
 
 	/*
 	 * ========================================================================
+	 * 步骤8：读取当前宿主绑定的目标
+	 * ========================================================================
+	 * 数据源：界面会话身份与插件官方只读工具。
+	 * 操作：1) 双向核对会话与代次；2) 不读取其他项目或会话的目标。
+	 */
+	async readGoals(request: GoalReadRequest): Promise<GoalSnapshot> {
+		this.logger.info("开始查询宿主目标");
+		try {
+			// 8.1 旧窗口请求在读取前后都必须与当前宿主匹配。
+			const snapshot = this.snapshot;
+			if (
+				this.disposed ||
+				request.cwd !== snapshot.cwd ||
+				request.sessionId !== snapshot.sessionId ||
+				request.generation !== snapshot.generation
+			)
+				throw new Error("会话已更换，请刷新目标状态");
+			const value = await this.goals.read();
+			if (this.disposed || this.snapshot.generation !== request.generation)
+				throw new Error("会话已关闭，请重新打开项目");
+			return value;
+		} finally {
+			this.logger.info("宿主目标查询结束");
+		}
+	}
+
+	/*
+	 * ========================================================================
+	 * 步骤7：运行中通过官方只读命令检查子智能体
+	 * ========================================================================
+	 * 数据源：当前会话注册命令与关联的详情回复。
+	 * 操作：1) 不经过模型或主任务提交锁；2) 由插件核对任务归属。
+	 */
+	async inspectSubagent(runId: string, childId?: string): Promise<SubagentInspection> {
+		this.logger.info("开始派发子智能体详情查询");
+		try {
+			// 7.1 查找命令后直接调用，插件缺失时不回退为模型提示词。
+			if (this.disposed) throw new Error("会话已关闭，请重新打开项目");
+			const target = subagentOutputRequestSchema.parse({ runId, childId: childId === runId ? undefined : childId });
+			const runner = this.runtime.session.extensionRunner;
+			const command = runner.getCommand("subagents-inspect-rpc");
+			if (!command) throw new Error("子代理详情接口尚未加载，请重载会话资源");
+			const reply = await this.extensionUI.requestSubagentInspection((requestId) =>
+				command.handler(
+					[requestId, target.runId, target.childId].filter(Boolean).join(" "),
+					runner.createCommandContext(),
+				),
+			);
+			// 7.2 回复必须属于请求目标，防止跨任务迟到结果进入右栏。
+			if (
+				!reply.error &&
+				((target.childId === undefined && reply.asyncId !== target.runId) || reply.childId !== target.childId)
+			)
+				throw new Error("子智能体详情回复与查询目标不匹配");
+			return reply;
+		} finally {
+			this.logger.info("子智能体详情查询派发结束");
+		}
+	}
+
+	/*
+	 * ========================================================================
 	 * 步骤4：在传输就绪后绑定扩展 UI 与生命周期
 	 * ========================================================================
 	 * 数据源：现有 ExtensionRunner；初始化提问可经快照跨重载恢复。
@@ -135,6 +202,7 @@ export class AgentHost {
 					void this.stop().catch(() => this.extensionUI.notify("扩展停止请求失败", "error"));
 				},
 			});
+			await this.goals.bind();
 			this.adapter.updateConfiguration(this.configuration());
 			if (this.planTools)
 				this.runtime.session.setActiveToolsByName(this.planTools.filter((name) => PLAN_TOOL_NAMES.has(name)));
@@ -245,10 +313,8 @@ export class AgentHost {
 			}
 			if (snapshot.dialogs.length) throw new Error("请先完成当前交互");
 			if (command.type === "goalCommand") {
-				const commandText =
-					command.action === "pause" ? "/goal-pause" : command.action === "resume" ? "/goal-resume" : "/goal-clear";
-				// 扩展命令在 SDK 内是即时控制通道，不等待当前模型回合结束。
-				await session.prompt(commandText, { source: "interactive" });
+				// 8.2 控制调用真实命令处理器，未知命令不交给模型。
+				await this.goals.control(command.action, command.goalId);
 				return;
 			}
 			if (command.type === "queueAction") {
@@ -293,6 +359,7 @@ export class AgentHost {
 						try {
 							// 5.1 初始化期间的扩展交互仍由独立 reply 命令响应。
 							await session.reload();
+							await this.goals.bind();
 						} finally {
 							this.adapter.updateResources();
 							this.adapter.endPrompt();

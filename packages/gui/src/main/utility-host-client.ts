@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { type UtilityProcess, utilityProcess } from "electron";
+import type { GoalReadRequest, GoalSnapshot } from "../shared/goals.ts";
 import type { Logger } from "../shared/logger.ts";
 import type { PluginPackage, PluginScope } from "../shared/plugins.ts";
 import {
@@ -10,6 +11,7 @@ import {
 	type PortNotification,
 	type SessionSnapshot,
 } from "../shared/protocol.ts";
+import type { SubagentInspection } from "../shared/subagents.ts";
 import type { SessionSummary, SessionTarget } from "../shared/workspace.ts";
 
 interface PendingRequest {
@@ -95,6 +97,17 @@ export class UtilityHostClient {
 		if (response.type !== "plugins") throw new Error("宿主插件响应无效");
 		return response.value;
 	}
+	async readGoals(request: GoalReadRequest): Promise<GoalSnapshot> {
+		this.logger.info("开始传输目标查询");
+		try {
+			// 1.5 查询携带会话代次，由宿主读取内存焦点与插件数据。
+			const response = await this.request({ ...request, type: "goals", id: randomUUID() });
+			if (response.type !== "goals") throw new Error("宿主目标响应无效");
+			return response.value;
+		} finally {
+			this.logger.info("目标查询传输结束");
+		}
+	}
 	async installPlugin(source: string): Promise<PluginPackage[]> {
 		const response = await this.request({ type: "plugins", id: randomUUID(), action: "install", source });
 		if (response.type !== "plugins") throw new Error("宿主插件响应无效");
@@ -114,6 +127,17 @@ export class UtilityHostClient {
 		});
 		if (response.type !== "subagentOutput") throw new Error("宿主子智能体响应无效");
 		return response.value;
+	}
+	async inspectSubagent(runId: string, childId?: string): Promise<SubagentInspection> {
+		this.logger.info("开始查询宿主子智能体详情");
+		try {
+			// 1.4 详情独立关联，不能排在长时间 prompt 请求之后。
+			const response = await this.request({ type: "subagentInspection", id: randomUUID(), runId, childId });
+			if (response.type !== "subagentInspection") throw new Error("宿主子智能体详情响应无效");
+			return response.value;
+		} finally {
+			this.logger.info("宿主子智能体详情查询结束");
+		}
 	}
 	async readSubagentTranscript(runId: string, childId?: string): Promise<string | null> {
 		const response = await this.request({
@@ -185,7 +209,7 @@ export class UtilityHostClient {
 		const waitForRun =
 			request.type === "transition" ||
 			(request.type === "command" &&
-				["prompt", "approvePlan", "login", "reloadResources", "queueAction", "enqueue"].includes(
+				["prompt", "approvePlan", "login", "reloadResources", "queueAction", "enqueue", "goalCommand"].includes(
 					request.value.command.type,
 				));
 		return new Promise((resolve, reject) => {

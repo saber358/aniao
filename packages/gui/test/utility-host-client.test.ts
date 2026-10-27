@@ -29,6 +29,95 @@ class ChildProcessFixture extends EventEmitter {
 describe("UtilityHostClient", () => {
 	/*
 	 * ========================================================================
+	 * 步骤4：核对目标确认和会话读取的独立传输
+	 * ========================================================================
+	 * 数据源：真实宿主客户端和受控 utilityProcess。
+	 * 操作：1) 交互确认不套用查询超时；2) 目标读取保留宿主身份。
+	 */
+	it("waits for goal confirmation and roundtrips a session-bound goal query", async () => {
+		logger.info("开始验证目标控制传输");
+		vi.useFakeTimers();
+		const child = new ChildProcessFixture();
+		vi.mocked(utilityProcess.fork).mockReturnValue(child as unknown as UtilityProcess);
+		const client = new UtilityHostClient("host.mjs", "C:/project", { type: "recent" }, logger, "C:/sdk", "C:/state");
+		child.emit("message", { type: "ready" });
+		try {
+			// 4.1 确认尚未回答时十秒查询期限不结束目标控制。
+			let finished = false;
+			const command = client
+				.dispatch({
+					requestId: "goal-clear",
+					sessionId: "session",
+					generation: "host",
+					command: { type: "goalCommand", action: "delete", goalId: "goal-1" },
+				})
+				.then(() => {
+					finished = true;
+				});
+			await vi.advanceTimersByTimeAsync(30000);
+			expect(finished).toBe(false);
+			const reading = client.readGoals({ cwd: "C:/project", sessionId: "session", generation: "host" });
+			await Promise.resolve();
+			const request = child.postMessage.mock.calls.at(-1)?.[0];
+			expect(request).toMatchObject({ type: "goals", cwd: "C:/project", sessionId: "session", generation: "host" });
+			child.emit("message", { type: "goals", id: request?.id, value: { goals: [], generatedAt: 1 } });
+			expect((await reading).goals).toEqual([]);
+			child.emit("message", { type: "result", id: "goal-clear" });
+			await command;
+			expect(finished).toBe(true);
+		} finally {
+			await client.close();
+			logger.info("目标控制传输验证结束");
+		}
+	});
+	/*
+	 * ========================================================================
+	 * 步骤3：验证详情查询跨进程往返
+	 * ========================================================================
+	 * 数据源：模拟 utilityProcess 与真实宿主协议校验。
+	 * 操作：1) 透传插件子任务键；2) 只接受关联的结构化详情。
+	 */
+	it("roundtrips an inspection while another command is pending", async () => {
+		logger.info("开始验证子智能体详情传输");
+		const child = new ChildProcessFixture();
+		vi.mocked(utilityProcess.fork).mockReturnValue(child as unknown as UtilityProcess);
+		const client = new UtilityHostClient("host.mjs", "C:/project", { type: "recent" }, logger, "C:/sdk", "C:/state");
+		child.emit("message", { type: "ready" });
+		try {
+			// 3.1 长请求未结束时，独立详情仍可以先返回。
+			const command = client.dispatch({
+				requestId: "main",
+				sessionId: "session-1",
+				generation: "host-1",
+				command: { type: "prompt", text: "任务" },
+			});
+			const inspection = client.inspectSubagent("run", "step:1");
+			await Promise.resolve();
+			const request = child.postMessage.mock.calls.at(-1)?.[0];
+			expect(request).toMatchObject({ type: "subagentInspection", runId: "run", childId: "step:1" });
+			child.emit("message", {
+				type: "subagentInspection",
+				id: request?.id,
+				value: {
+					kind: "pi-subagents.inspect-reply",
+					version: 1,
+					requestId: "inspection",
+					asyncId: "run",
+					childId: "step:1",
+					status: "running",
+					task: "检查文件",
+				},
+			});
+			expect(await inspection).toMatchObject({ task: "检查文件" });
+			child.emit("message", { type: "result", id: "main" });
+			await command;
+		} finally {
+			await client.close();
+			logger.info("子智能体详情传输验证完成");
+		}
+	});
+	/*
+	 * ========================================================================
 	 * 步骤2：验证批准后的执行不套用查询超时
 	 * ========================================================================
 	 * 数据源：模拟时钟与独立宿主替身。

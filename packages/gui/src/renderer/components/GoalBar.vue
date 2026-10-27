@@ -1,27 +1,35 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import type { GoalStatus, GoalTaskView, GoalView } from "../../shared/goals.ts";
+import { computed, ref } from "vue";
+import type { GoalAction, GoalStatus, GoalTaskView } from "../../shared/goals.ts";
+import { createLogger } from "../../shared/logger.ts";
+import { useGoals } from "../composables/use-goals.ts";
 import { UIcon } from "../ui.ts";
 
-const props = defineProps<{ cwd: string; sessionId: string }>();
-const emit = defineEmits<{ action: [action: "pause" | "resume" | "delete"] }>();
+const props = defineProps<{
+	cwd: string;
+	sessionId: string;
+	generation: string;
+	control: (action: GoalAction, goalId: string) => Promise<boolean>;
+}>();
 /*
- * 只在应用启动后的首个会话隐藏已有目标；用户主动切换会话后恢复显示。
- * 状态放在模块级，避免切换会话导致组件重建时再次隐藏。
+ * ========================================================================
+ * 步骤1：展示当前会话的目标
+ * ========================================================================
+ * 数据源：受会话身份约束的目标接口。
+ * 操作：1) 启动即显示已绑定目标；2) 无焦点会话不显示其他会话目标。
  */
-let startupSessionId: string | null = null;
-let startupSuppression = true;
-const startupSuppressedGoalIds = new Set<string>();
-const goals = ref<GoalView[]>([]);
+const logger = createLogger("goal-bar");
+logger.info("开始建立当前会话目标栏");
+// 1.1 操作回调等待宿主实际完成，不让定时刷新提前释放按钮。
+const { goals, error, pendingAction, loading, refresh, act } = useGoals(
+	() => ({ cwd: props.cwd, sessionId: props.sessionId, generation: props.generation }),
+	window.piDesktop,
+	(action, goalId) => props.control(action, goalId),
+	logger,
+);
 const expanded = ref(false);
-const pendingAction = ref<"pause" | "resume" | "delete" | null>(null);
-const suppressedGoalIds = ref(new Set(startupSuppressedGoalIds));
-let timer: ReturnType<typeof setInterval> | undefined;
-let generation = 0;
-
-const visibleGoals = computed(() => goals.value.filter((item) => !suppressedGoalIds.value.has(item.id)));
-const goal = computed(() => visibleGoals.value[0]);
-const otherGoals = computed(() => Math.max(0, visibleGoals.value.length - 1));
+const goal = computed(() => goals.value[0]);
+logger.info("当前会话目标栏建立完成");
 
 const statusText: Record<GoalStatus, string> = {
 	running: "进行中",
@@ -31,50 +39,6 @@ const statusText: Record<GoalStatus, string> = {
 	budget_limited: "预算限制",
 	complete: "已完成",
 };
-
-async function load(): Promise<void> {
-	const current = ++generation;
-	try {
-		const snapshot = await window.piDesktop.readGoals(props.cwd, props.sessionId);
-		if (current !== generation) return;
-		if (startupSuppression) {
-			if (startupSessionId === null) {
-				startupSessionId = props.sessionId;
-				for (const item of snapshot.goals) startupSuppressedGoalIds.add(item.id);
-			} else if (startupSessionId !== props.sessionId) {
-				startupSuppression = false;
-				startupSuppressedGoalIds.clear();
-			}
-		}
-		suppressedGoalIds.value = new Set(startupSuppressedGoalIds);
-		goals.value = snapshot.goals;
-		pendingAction.value = null;
-	} catch {
-		if (current === generation) goals.value = [];
-	}
-}
-
-watch(
-	() => [props.cwd, props.sessionId] as const,
-	() => {
-		generation++;
-		startupSuppression = false;
-		startupSuppressedGoalIds.clear();
-		startupSessionId = props.sessionId;
-		suppressedGoalIds.value = new Set();
-		goals.value = [];
-		void load();
-	},
-);
-
-onMounted(() => {
-	void load();
-	timer = setInterval(() => void load(), 2500);
-});
-onBeforeUnmount(() => {
-	generation++;
-	if (timer) clearInterval(timer);
-});
 
 function formatDuration(seconds: number): string {
 	if (!seconds) return "";
@@ -102,14 +66,13 @@ function taskIcon(task: GoalTaskView): string {
 function taskClass(task: GoalTaskView): Record<string, boolean> {
 	return { complete: task.status === "complete", skipped: task.status === "skipped", current: task.current };
 }
-
-function act(action: "pause" | "resume" | "delete"): void {
-	pendingAction.value = action;
-	emit("action", action);
-}
 </script>
 
 <template>
+	<div v-if="error" class="goal-read-error" role="alert">
+		<span>{{ error }}</span
+		><button type="button" :disabled="loading || pendingAction !== null" @click="refresh">重试</button>
+	</div>
 	<section v-if="goal" class="goal-bar" :class="`status-${goal.status}`" aria-label="目标进度">
 		<div
 			class="goal-summary"
@@ -149,6 +112,7 @@ function act(action: "pause" | "resume" | "delete"): void {
 			</span>
 			<span class="goal-actions" aria-label="目标操作">
 				<button
+					v-if="goal.status !== 'complete'"
 					type="button"
 					class="goal-action"
 					:disabled="pendingAction !== null"
@@ -212,12 +176,27 @@ function act(action: "pause" | "resume" | "delete"): void {
 				<UIcon name="i-lucide-circle-pause" aria-hidden="true" />
 				{{ goal.pauseReason }}
 			</p>
-			<p v-if="otherGoals" class="goal-other">另有 {{ otherGoals }} 个进行中的目标</p>
+			<p v-if="goal.truncated" class="goal-other">内容较长，当前展示部分信息。完整内容保存在目标插件中。</p>
 		</div>
 	</section>
 </template>
 
 <style scoped>
+.goal-read-error {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 8px;
+	color: var(--danger);
+	font-size: 11px;
+}
+.goal-read-error button {
+	border: 0;
+	background: transparent;
+	color: inherit;
+	cursor: pointer;
+	text-decoration: underline;
+}
 .goal-bar {
 	margin: 0 0 10px;
 	overflow: hidden;

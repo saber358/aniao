@@ -63,6 +63,17 @@ async function startHost(): Promise<void> {
 			} else if (request.type === "command") {
 				await host.dispatch(request.value);
 				post({ type: "result", id: request.id });
+			} else if (request.type === "goals") {
+				// 1.4 当前会话目标由宿主插件提供，不跨项目扫描磁盘。
+				post({
+					type: "goals",
+					id: request.id,
+					value: await host.readGoals({
+						cwd: request.cwd,
+						sessionId: request.sessionId,
+						generation: request.generation,
+					}),
+				});
 			} else if (request.type === "plugins") {
 				const source = request.source ?? "";
 				const value =
@@ -80,7 +91,15 @@ async function startHost(): Promise<void> {
 						runtime.session.sessionManager.getSessionDir(),
 						request.runId,
 						request.childId,
+						runtime.session.sessionManager.getSessionFile(),
 					),
+				});
+			} else if (request.type === "subagentInspection") {
+				// 1.3 直接查询扩展，不调用模型，也不受主任务提交互斥限制。
+				post({
+					type: "subagentInspection",
+					id: request.id,
+					value: await host.inspectSubagent(request.runId, request.childId),
 				});
 			} else if (request.type === "subagentTranscript") {
 				post({

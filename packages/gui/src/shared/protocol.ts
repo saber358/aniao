@@ -4,7 +4,13 @@ import { CLIPBOARD_TEXT_LIMIT, type ClipboardPort } from "./clipboard.ts";
 import type { EditAction } from "./edit.ts";
 import type { GitDiff, GitDiffRequest, GitMutationRequest, GitStatus } from "./git.ts";
 import type { GitWorktree, WorktreeCreate, WorktreeRemove } from "./git-worktree.ts";
-import type { GoalSnapshot } from "./goals.ts";
+import {
+	type GoalReadRequest,
+	type GoalSnapshot,
+	goalActionSchema,
+	goalReadRequestSchema,
+	goalSnapshotSchema,
+} from "./goals.ts";
 import { imageIdSchema, imageIdsSchema, imageUrlSchema } from "./image-schema.ts";
 import type { ImagesPort } from "./images.ts";
 import { DRAFT_TEXT_LIMIT } from "./input-limits.ts";
@@ -26,6 +32,7 @@ import { customProviderInputSchema } from "./provider.ts";
 import { queueModeSchema, queueStateSchema } from "./queue.ts";
 import { resourceSnapshotSchema } from "./resources.ts";
 import type { ScheduleCreate, ScheduledSnapshot, SchedulePause } from "./schedule.ts";
+import { type SubagentInspection, subagentInspectionSchema, subagentOutputRequestSchema } from "./subagents.ts";
 import type {
 	TerminalClose,
 	TerminalCreate,
@@ -37,7 +44,10 @@ import type {
 import type { UpdatePort } from "./update.ts";
 import {
 	draftSchema,
+	type SessionIdentity,
+	type SessionRuntime,
 	sessionIdSchema,
+	sessionRuntimeSchema,
 	sessionSummarySchema,
 	sessionTargetSchema,
 	sessionTitleSchema,
@@ -150,7 +160,7 @@ export const commandSchema = z.discriminatedUnion("type", [
 	z.object({ type: z.literal("setThinking"), level: thinkingLevelSchema }),
 	z.object({ type: z.literal("setApiKey"), provider: identifier, key: z.string().trim().min(1).max(16384) }),
 	z.object({ type: z.literal("saveProvider"), provider: customProviderInputSchema }),
-	z.object({ type: z.literal("goalCommand"), action: z.enum(["pause", "resume", "delete"]) }),
+	z.object({ type: z.literal("goalCommand"), action: goalActionSchema, goalId: z.string().min(1).max(200) }),
 	z.object({
 		type: z.literal("queueAction"),
 		action: z.enum(["steer", "remove", "edit"]),
@@ -195,11 +205,19 @@ export const eventEnvelopeSchema = z.object({
 });
 export const notificationSchema = z.discriminatedUnion("type", [
 	z.object({ type: z.literal("event"), value: eventEnvelopeSchema }),
-	z.object({ type: z.literal("disconnected"), reason: z.string().max(8192) }),
+	z.object({
+		type: z.literal("disconnected"),
+		reason: z.string().max(8192),
+		sessionId: identifier.optional(),
+		generation: identifier.optional(),
+	}),
+	z.object({ type: z.literal("sessions"), sessions: z.array(sessionRuntimeSchema).max(20000) }),
 ]);
 
 // 1.3 宿主 RPC 与业务事件共用校验，但不混用请求编号与事件序号。
 export const hostRequestSchema = z.discriminatedUnion("type", [
+	goalReadRequestSchema.extend({ type: z.literal("goals"), id: identifier }),
+	subagentOutputRequestSchema.extend({ type: z.literal("subagentInspection"), id: identifier }),
 	z.object({ type: z.literal("transition"), id: identifier, target: sessionTargetSchema }),
 	z.object({ type: z.literal("image"), id: identifier, imageId: imageIdSchema }),
 	z.object({ type: z.literal("snapshot"), id: identifier }),
@@ -233,6 +251,8 @@ export const hostRequestSchema = z.discriminatedUnion("type", [
 	z.object({ type: z.literal("shutdown"), id: identifier }),
 ]);
 export const hostResponseSchema = z.discriminatedUnion("type", [
+	z.object({ type: z.literal("goals"), id: identifier, value: goalSnapshotSchema }),
+	z.object({ type: z.literal("subagentInspection"), id: identifier, value: subagentInspectionSchema }),
 	z.object({ type: z.literal("image"), id: identifier, url: imageUrlSchema }),
 	z.object({ type: z.literal("ready"), forkDraft: draftSchema.shape.text.min(1).optional() }),
 	z.object({ type: z.literal("event"), value: eventEnvelopeSchema }),
@@ -325,6 +345,8 @@ export interface DesktopBridge
 		McpPort,
 		UpdatePort {
 	openProject(): Promise<boolean>;
+	getSessionSnapshot(identity: SessionIdentity): Promise<SessionSnapshot | null>;
+	getSessionRuntimes(): Promise<SessionRuntime[]>;
 	newSession(): Promise<void>;
 	openExternal(url: string): Promise<void>;
 	openConfig(): Promise<void>;
@@ -334,7 +356,8 @@ export interface DesktopBridge
 	removePlugin(cwd: string, source: string, scope: PluginScope): Promise<PluginPackage[]>;
 	readSubagentOutput(runId: string, childId?: string): Promise<string | null>;
 	readSubagentTranscript(runId: string, childId?: string): Promise<string | null>;
-	readGoals(cwd: string, sessionId: string): Promise<GoalSnapshot>;
+	inspectSubagent(runId: string, childId?: string): Promise<SubagentInspection>;
+	readGoals(request: GoalReadRequest): Promise<GoalSnapshot>;
 	edit(action: EditAction): Promise<void>;
 	minimizeWindow(): void;
 	toggleMaximizeWindow(): void;
@@ -343,6 +366,8 @@ export interface DesktopBridge
 
 export const IPC_CHANNELS = {
 	snapshot: "pi-gui:snapshot",
+	sessionSnapshot: "pi-gui:session-snapshot",
+	sessionRuntimes: "pi-gui:session-runtimes",
 	command: "pi-gui:command",
 	notification: "pi-gui:notification",
 	openProject: "pi-gui:open-project",
@@ -398,6 +423,7 @@ export const IPC_CHANNELS = {
 	pluginsRemove: "pi-gui:plugins-remove",
 	subagentOutput: "pi-gui:subagent-output",
 	subagentTranscript: "pi-gui:subagent-transcript",
+	subagentInspection: "pi-gui:subagent-inspection",
 	goalsRead: "pi-gui:goals-read",
 	library: "pi-gui:library",
 	projects: "pi-gui:projects",

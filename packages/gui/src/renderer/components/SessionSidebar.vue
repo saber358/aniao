@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import type { ProjectSummary, SessionChange, SessionItem } from "../../shared/workspace.ts";
+import type { ProjectSummary, SessionChange, SessionItem, SessionRuntime } from "../../shared/workspace.ts";
 import { createLogger } from "../../shared/logger.ts";
 import { UIcon, UButton, UDropdownMenu, UInput, UModal } from "../ui.ts";
 import SidebarHeader from "./SidebarHeader.vue";
@@ -9,7 +9,7 @@ const props = defineProps<{
 	sessions: SessionItem[];
 	projects: ProjectSummary[];
 	activeId?: string;
-	runningId?: string;
+	runtimes: SessionRuntime[];
 	disabled: boolean;
 	connected: boolean;
 	resourcesDisabled: boolean;
@@ -34,6 +34,7 @@ const emit = defineEmits<{
 	showConversation: [];
 }>();
 const logger = createLogger("session-sidebar");
+const runtimeById = computed(() => new Map(props.runtimes.map((runtime) => [runtime.sessionId, runtime])));
 const query = ref("");
 const searchOpen = ref(false);
 const archived = ref(false);
@@ -203,9 +204,9 @@ async function rename() {
 <template>
 	<aside class="sidebar">
 		<SidebarHeader
-			:disabled="!activeId || disabled || !connected"
-			:resources-disabled="!activeId || !connected"
-			:automation-disabled="!activeId || !connected"
+			:disabled="!activeId || disabled"
+			:resources-disabled="resourcesDisabled"
+			:automation-disabled="automationDisabled"
 			:active-page="activePage"
 			@create="emit('create')"
 			@open-resources="emit('openResources')"
@@ -283,7 +284,7 @@ async function rename() {
 						type="button"
 						class="project-open"
 						:title="project.cwd"
-						:disabled="disabled || !connected"
+						:disabled="disabled"
 						@click="openProject(project)"
 					>
 						<span class="project-name">{{ project.name }}</span>
@@ -306,7 +307,7 @@ async function rename() {
 							variant="ghost"
 							size="xs"
 							class="project-new"
-							:disabled="disabled || !connected"
+							:disabled="disabled"
 							@click="emit('newSessionAt', project.cwd)"
 						/>
 					</div>
@@ -316,27 +317,33 @@ async function rename() {
 						<div
 							v-for="session in filtered.slice(0, limit)"
 							:key="session.id"
-							:class="['session-row', { active: session.id === activeId, running: session.id === runningId }]"
+							:class="[
+								'session-row',
+								{ active: session.id === activeId, running: runtimeById.get(session.id)?.running },
+							]"
 						>
 							<button
 								type="button"
 								class="session-open"
 								:aria-current="session.id === activeId ? 'page' : undefined"
-								:aria-busy="session.id === runningId"
-								:disabled="disabled || !connected"
+								:aria-busy="runtimeById.get(session.id)?.running ?? false"
+								:disabled="disabled"
 								:title="session.preview || session.title"
 								@click="emit('select', session.id)"
 							>
 								<span
-									v-if="session.id === runningId"
+									v-if="runtimeById.get(session.id)?.running"
 									class="session-running-spinner"
 									role="status"
 									aria-label="正在运行"
 									title="正在运行"
 								></span>
 								<span v-if="session.pinned" class="pin-indicator">置顶</span
-								><span class="session-name">{{ session.title }}</span>
+								><span class="session-name">{{ runtimeById.get(session.id)?.title || session.title }}</span>
 							</button>
+							<span v-if="runtimeById.get(session.id)?.attention" class="session-attention">{{
+								runtimeById.get(session.id)?.connected ? "待处理" : "已断开"
+							}}</span>
 							<span class="session-time">{{ relativeTime(session.updatedAt) }}</span>
 							<UDropdownMenu :items="actions(session)"
 								><UButton
@@ -363,17 +370,26 @@ async function rename() {
 						type="button"
 						class="tree-session"
 						:title="session.preview || session.title"
-						:disabled="disabled || !connected"
+						:disabled="disabled"
 						@click="emit('selectAt', { cwd: project.cwd, sessionId: session.id })"
 					>
-						<span class="session-name">{{ session.title }}</span>
+						<span
+							v-if="runtimeById.get(session.id)?.running"
+							class="session-running-spinner"
+							role="status"
+							aria-label="正在运行"
+						></span>
+						<span class="session-name">{{ runtimeById.get(session.id)?.title || session.title }}</span>
+						<span v-if="runtimeById.get(session.id)?.attention" class="session-attention">{{
+							runtimeById.get(session.id)?.connected ? "待处理" : "已断开"
+						}}</span>
 						<span class="session-time">{{ relativeTime(session.updatedAt) }}</span>
 					</button>
 					<button
 						v-if="project.sessions.length > 3"
 						type="button"
 						class="tree-more"
-						:disabled="disabled || !connected"
+						:disabled="disabled"
 						@click="emit('openWorkspace', project.cwd)"
 					>
 						查看全部 {{ project.sessions.length }} 个会话
@@ -447,3 +463,15 @@ async function rename() {
 		<slot name="footer" />
 	</aside>
 </template>
+
+<style scoped>
+.session-attention {
+	flex: none;
+	color: var(--accent);
+	font-size: 10px;
+}
+.tree-session .session-running-spinner {
+	position: static;
+	margin: 0;
+}
+</style>

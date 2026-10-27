@@ -43,6 +43,18 @@ export const projectSummarySchema = z.object({
 	sessions: z.array(sessionItemSchema).max(100),
 });
 export const workspacePathSchema = z.string().min(1).max(4096);
+export const sessionIdentitySchema = z
+	.object({ sessionId: sessionIdSchema, generation: z.string().min(1).max(4096) })
+	.strict();
+export const sessionRuntimeSchema = sessionIdentitySchema.extend({
+	cwd: workspacePathSchema,
+	title: z.string().max(4096),
+	running: z.boolean(),
+	attention: z.boolean(),
+	connected: z.boolean(),
+});
+export type SessionIdentity = z.infer<typeof sessionIdentitySchema>;
+export type SessionRuntime = z.infer<typeof sessionRuntimeSchema>;
 export const workspaceNameSchema = z
 	.string()
 	.trim()

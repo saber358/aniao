@@ -44,6 +44,7 @@ const {
 	changeProject,
 	library,
 	projects,
+	sessionRuntimes,
 	refreshLibrary,
 	openWorkspace,
 	newSessionAt,
@@ -124,6 +125,13 @@ watch(snapshot, (value) => {
 watch(viewMode, (value) => {
 	if (value !== "app") sidePanelOpen.value = false;
 });
+watch(
+	() => snapshot.value?.sessionId,
+	() => {
+		planMode.value = false;
+		sidePanelOpen.value = false;
+	},
+);
 const busy = computed(
 	() =>
 		state.value.connection === "connected" &&
@@ -192,8 +200,8 @@ async function saveCustomProvider(provider: CustomProviderInput) {
 		logger.info("自定义 Provider 保存结束");
 	}
 }
-function goalAction(action: "pause" | "resume" | "delete"): void {
-	void controller.send({ type: "goalCommand", action });
+function goalAction(action: "pause" | "resume" | "delete", goalId: string): Promise<boolean> {
+	return controller.send({ type: "goalCommand", action, goalId });
 }
 async function queueAction(action: "steer" | "remove" | "edit", itemId: string, text?: string): Promise<boolean> {
 	logger.info("开始提交队列条目操作");
@@ -439,6 +447,7 @@ function showConversation(): void {
 
 async function selectSession(sessionId: string) {
 	showConversation();
+	if (snapshot.value?.sessionId === sessionId && state.value.connection === "connected") return;
 	await openSession(sessionId);
 }
 
@@ -631,9 +640,9 @@ onBeforeUnmount(() => {
 						:sessions="library?.sessions ?? []"
 						:projects="projects"
 						:active-id="snapshot?.sessionId"
-						:running-id="snapshot && snapshot.run.phase !== 'idle' ? snapshot.sessionId : undefined"
+						:runtimes="sessionRuntimes"
 						:cwd="snapshot?.cwd"
-						:disabled="busy || changing"
+						:disabled="changing || state.selectingFiles"
 						:connected="state.connection === 'connected'"
 						:resources-disabled="!snapshot || state.connection !== 'connected'"
 						:automation-disabled="!snapshot || state.connection !== 'connected'"
@@ -818,7 +827,8 @@ onBeforeUnmount(() => {
 											v-if="snapshot"
 											:cwd="snapshot.cwd"
 											:session-id="snapshot.sessionId"
-											@action="goalAction"
+											:generation="snapshot.generation"
+											:control="goalAction"
 										/>
 										<ImageInputZone
 											:import-images="(read) => controller.attachImages(read)"
@@ -1015,7 +1025,7 @@ onBeforeUnmount(() => {
 								<SidePanel
 									v-if="sidePanelOpen && snapshot"
 									ref="sidePanel"
-									:key="snapshot.cwd"
+									:key="`${snapshot.sessionId}-${snapshot.generation}`"
 									:cwd="snapshot.cwd"
 									:subagents="snapshot.extensions.subagents ?? null"
 									@close="sidePanelOpen = false"

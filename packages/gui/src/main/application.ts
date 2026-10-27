@@ -51,6 +51,7 @@ import {
 	projectFileSelectionSchema,
 	sessionAtSchema,
 	sessionChangeSchema,
+	sessionIdentitySchema,
 	sessionIdSchema,
 	workspacePathSchema,
 	workspaceRenameSchema,
@@ -59,7 +60,6 @@ import { BrowserService } from "./browser-service.ts";
 import { resolveAgentDirectory, seedDefaultProvider } from "./default-provider.ts";
 import { previewProjectFile } from "./file-preview.ts";
 import { GitService } from "./git-service.ts";
-import { readGoals } from "./goal-service.ts";
 import { McpService } from "./mcp-service.ts";
 import { ParallelScheduler } from "./parallel-scheduler.ts";
 import { ProjectBrowser } from "./project-browser.ts";
@@ -452,6 +452,14 @@ export async function startApplication(): Promise<void> {
 		verifySender(event);
 		return workspace.getSnapshot();
 	});
+	ipcMain.handle(IPC_CHANNELS.sessionSnapshot, (event, input: unknown) => {
+		verifySender(event);
+		return workspace.getSessionSnapshot(sessionIdentitySchema.parse(input));
+	});
+	ipcMain.handle(IPC_CHANNELS.sessionRuntimes, (event) => {
+		verifySender(event);
+		return workspace.getSessionRuntimes();
+	});
 	ipcMain.handle(IPC_CHANNELS.command, (event, input: unknown) => {
 		verifySender(event);
 		return workspace.dispatch(commandEnvelopeSchema.parse(input));
@@ -615,6 +623,17 @@ export async function startApplication(): Promise<void> {
 		const request = subagentOutputRequestSchema.parse(input);
 		return workspace.readSubagentOutput(request.runId, request.childId);
 	});
+	ipcMain.handle(IPC_CHANNELS.subagentInspection, async (event, input: unknown) => {
+		verifySender(event);
+		const request = subagentOutputRequestSchema.parse(input);
+		logger.info("开始转发子智能体详情查询");
+		try {
+			// 1.8 查询只交给当前宿主，不接受 Renderer 指定会话目录。
+			return await workspace.inspectSubagent(request.runId, request.childId);
+		} finally {
+			logger.info("子智能体详情查询转发结束");
+		}
+	});
 	ipcMain.handle(IPC_CHANNELS.subagentTranscript, async (event, input: unknown) => {
 		verifySender(event);
 		const request = subagentOutputRequestSchema.parse(input);
@@ -623,7 +642,7 @@ export async function startApplication(): Promise<void> {
 	ipcMain.handle(IPC_CHANNELS.goalsRead, async (event, input: unknown) => {
 		verifySender(event);
 		const request = goalReadRequestSchema.parse(input);
-		return readGoals(request.cwd, request.sessionId);
+		return workspace.readGoals(request);
 	});
 	ipcMain.handle(IPC_CHANNELS.mcpList, async (event) => {
 		verifySender(event);
