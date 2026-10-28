@@ -185,7 +185,7 @@ $env:ELECTRON_BUILDER_BINARIES_MIRROR="https://npmmirror.com/mirrors/electron-bu
 
 `node e2e/sidebar-resize.mjs` 验证左栏拖拽方向、连续收起展开、宽度上下限、键盘调整、窗口缩放、设置页期间缩放、窄窗口布局及原生网页输入保持。两组脚本都支持 `PI_GUI_PACKAGED_EXECUTABLE` 指向已打包程序。
 
-`node e2e/settings-data.mjs` 验证统计与归档的完整本机流程，使用独立 SDK 历史和精确已知用量，不访问真实账号，不调用模型。`test/usage-statistics.test.ts`、`test/archive-management.test.ts` 和 `test/session-data-client.test.ts` 覆盖日期、分支去重、自动归档保护、持久化、删除失败和只读进程清理。
+`node e2e/settings-data.mjs` 验证统计与归档的完整本机流程，使用独立 SDK 历史和精确已知用量，不访问真实账号，不调用模型。设置 `PI_GUI_PACKAGED_EXECUTABLE` 可直接验证实际安装包；项目筛选按可见名称选择，兼容 Windows 与 Linux 路径。`test/usage-statistics.test.ts`、`test/archive-management.test.ts` 和 `test/session-data-client.test.ts` 覆盖日期、分支去重、自动归档保护、持久化、删除失败和只读进程清理。
 
 内置浏览器新增 9 项离线单测，覆盖地址和命令边界、隔离权限、布局裁切、旧标签和迟到事件、失败重试、下载保留及资源回收。`e2e/browser.mjs` 在真实 Electron 中验证禁止 iframe 的网页、地址与历史、刷新停止、新窗口链接复用、标签状态、弹窗层级、鼠标拖拽、360 px 深浅样式、1100 × 720 最小窗口、错误重试、下载提示和关闭清理；报告与原生窗口截图位于 `artifacts/browser-1792748509905/`，独立命令行复跑为 `artifacts/browser-1792748876971/results.json`。额外 30 秒交互检查通过，覆盖加载中修改地址、反复切换工具/设置和窗口/主题往返，见 `artifacts/browser-1792749043132/exploration.json`。全仓检查及浏览器、应用快捷键、启动窗口的 15 项聚焦测试通过。开发服务运行时可在本包目录运行 `node e2e/browser.mjs`，非默认端口用 `ELECTRON_RENDERER_URL` 指定。验收使用本机网页和独立认证，没有验证真实站点登录；本轮浏览器功能尚未打包发布。
 

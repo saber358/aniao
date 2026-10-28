@@ -16,6 +16,7 @@ const agent = join(artifacts, "agent");
 const profile = join(artifacts, "profile");
 const projects = [join(artifacts, "project"), join(artifacts, "ZCodeProject")];
 const renderer = process.env.ELECTRON_RENDERER_URL ?? "http://localhost:5173";
+const packagedExecutable = process.env.PI_GUI_PACKAGED_EXECUTABLE;
 const fixtures = [];
 const checks = [];
 const failures = [];
@@ -126,11 +127,13 @@ async function launch() {
 		ELECTRON_RENDERER_URL: renderer,
 	};
 	for (const key of ["ELECTRON_RUN_AS_NODE", "NODE_OPTIONS", "NODE_PATH", "PI_PACKAGE_DIR"]) delete environment[key];
+	// 1.2 打包验收只加载安装包页面，不能回退到本机开发服务。
+	if (packagedExecutable) delete environment.ELECTRON_RENDERER_URL;
 	application = await _electron.launch({
-		executablePath: electronExecutable,
-		args: [join(root, "dist/main/index.cjs"), `--user-data-dir=${profile}`],
+		executablePath: packagedExecutable ?? electronExecutable,
+		args: [...(packagedExecutable ? [] : [join(root, "dist/main/index.cjs")]), `--user-data-dir=${profile}`],
 		env: environment,
-		cwd: root,
+		cwd: packagedExecutable ? dirname(packagedExecutable) : root,
 		timeout: 60000,
 	});
 	const log = createWriteStream(join(artifacts, `electron-${Date.now()}.log`));
@@ -140,7 +143,11 @@ async function launch() {
 	await poll(async () => {
 		page = application
 			.windows()
-			.find((candidate) => candidate.url().startsWith(renderer) && !candidate.url().includes("startup.html"));
+			.find(
+				(candidate) =>
+					candidate.url().startsWith(packagedExecutable ? "file:" : renderer) &&
+					!candidate.url().includes("startup.html"),
+			);
 		return Boolean(page);
 	}, "工作台未就绪");
 	page.on("pageerror", (error) => failures.push(error.message));
@@ -369,7 +376,7 @@ try {
 	assert.equal(await page.locator(".archived-session").count(), 1);
 	await page.getByRole("searchbox", { name: "搜索已归档会话", exact: true }).fill("");
 	await page.getByLabel("归档排序方式", { exact: true }).selectOption("title");
-	await page.getByLabel("归档项目筛选", { exact: true }).selectOption(projects[0].replaceAll("/", "\\"));
+	await page.getByLabel("归档项目筛选", { exact: true }).selectOption({ label: "project" });
 	assert.equal(await page.locator(".archive-project").count(), 1);
 	await page.getByLabel("归档项目筛选", { exact: true }).selectOption("");
 	const restore = fixtures.find((item) => item.projectIndex === 0 && item.index === 2);
