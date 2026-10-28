@@ -28,8 +28,12 @@ export default defineConfig({
 				async closeBundle() {
 					logger.info("开始准备独立 SDK 宿主");
 					await bundleHost({
-						entryPoints: [fileURLToPath(new URL("./src/host/index.ts", import.meta.url))],
-						outfile: fileURLToPath(new URL("./dist/main/host.mjs", import.meta.url)),
+						entryPoints: {
+							host: fileURLToPath(new URL("./src/host/index.ts", import.meta.url)),
+							"session-data": fileURLToPath(new URL("./src/host/session-data-worker.ts", import.meta.url)),
+						},
+						outdir: fileURLToPath(new URL("./dist/main", import.meta.url)),
+						outExtension: { ".js": ".mjs" },
 						bundle: true,
 						platform: "node",
 						format: "esm",
@@ -163,6 +167,7 @@ export default defineConfig({
 							"lucide:notebook-pen",
 							"lucide:target",
 							"lucide:chart-no-axes-combined",
+							"lucide:chart-no-axes-column",
 							"lucide:send",
 							"lucide:code-xml",
 						],

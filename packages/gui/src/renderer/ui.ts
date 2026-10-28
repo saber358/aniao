@@ -13,3 +13,4 @@ export { default as UModal } from "@nuxt/ui/components/Modal.vue";
 export { default as USelectMenu } from "@nuxt/ui/components/SelectMenu.vue";
 export { default as USplitter } from "@nuxt/ui/components/Splitter.vue";
 export { default as UTextarea } from "@nuxt/ui/components/Textarea.vue";
+export { default as UTooltip } from "@nuxt/ui/components/Tooltip.vue";

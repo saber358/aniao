@@ -11,8 +11,10 @@ import { UButton, UIcon, UInput, UModal, USelectMenu } from "../ui.ts";
 import OAuthProgress from "./OAuthProgress.vue";
 import AppUpdatePanel from "./AppUpdatePanel.vue";
 import UpdateDownloadButton from "./UpdateDownloadButton.vue";
+import UsageStatistics from "./UsageStatistics.vue";
+import ArchiveManagement from "./ArchiveManagement.vue";
 
-type SettingsSection = "account" | "general" | "models" | "mcp" | "skills" | "plugins" | "agent";
+type SettingsSection = "account" | "general" | "models" | "mcp" | "skills" | "plugins" | "agent" | "usage" | "archives";
 type ProviderAddMode = "builtin" | "custom";
 type ProviderThinkingLevel = NonNullable<CustomModelInput["thinkingLevels"]>[number];
 
@@ -44,6 +46,7 @@ const emit = defineEmits<{
 	"download-update": [];
 	"install-update": [];
 	"open-skills": [];
+	"data-changed": [];
 }>();
 const logger = createLogger("settings");
 const active = ref<SettingsSection>("account");
@@ -95,10 +98,13 @@ const sections: Array<{ id: SettingsSection; label: string; icon: string }> = [
 	{ id: "skills", label: "技能", icon: "i-lucide-book-open" },
 	{ id: "plugins", label: "插件", icon: "i-lucide-puzzle" },
 	{ id: "agent", label: "Agent 预设", icon: "i-lucide-bot" },
+	{ id: "usage", label: "使用统计", icon: "i-lucide-chart-no-axes-column" },
+	{ id: "archives", label: "归档管理", icon: "i-lucide-archive" },
 ];
 const sectionGroups = [
 	{ label: "基础设置", items: sections.slice(0, 3) },
-	{ label: "Agent 能力", items: sections.slice(3) },
+	{ label: "Agent 能力", items: sections.slice(3, 7) },
+	{ label: "数据与统计", items: sections.slice(7) },
 ];
 const mcpServers = ref<McpServerSummary[]>([]);
 const mcpBusy = ref(false);
@@ -573,8 +579,13 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 				</div>
 			</nav>
 
-			<div class="settings-content">
-				<section v-if="active === 'account'" class="settings-section">
+			<div
+				class="settings-content"
+				:class="{ 'data-settings-content': active === 'usage' || active === 'archives' }"
+			>
+				<UsageStatistics v-if="active === 'usage'" :dark="dark" />
+				<ArchiveManagement v-else-if="active === 'archives'" @changed="emit('data-changed')" />
+				<section v-else-if="active === 'account'" class="settings-section">
 					<h3>账号与余额</h3>
 					<div class="account-card">
 						<span class="account-avatar" aria-hidden="true">A</span>
@@ -1291,6 +1302,13 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 	gap: 6px;
 }
 .settings-page {
+	--settings-content-width: min(66.666667%, 832px);
+	--settings-heading-size: 32px;
+	--settings-section-heading-size: 14px;
+	--settings-body-size: 13px;
+	--settings-caption-size: 12px;
+	--settings-metric-size: 16px;
+	--settings-metric-caption-size: 11px;
 	display: flex;
 	flex: 1;
 	min-height: 0;
@@ -1378,14 +1396,16 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 }
 .settings-section {
 	display: grid;
+	grid-template-columns: minmax(0, 1fr);
 	gap: 14px;
-	width: min(100%, 1100px);
+	width: var(--settings-content-width);
+	min-width: 0;
 	margin-inline: auto;
 }
 .settings-section h3 {
 	margin: 0 0 2px;
 	color: var(--ink);
-	font-size: 16px;
+	font-size: var(--settings-heading-size);
 	font-weight: 600;
 }
 .provider-list {
@@ -1413,7 +1433,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 	max-width: min(52vw, 620px);
 	color: var(--faint);
 	font-family: "Cascadia Code", Consolas, monospace;
-	font-size: 9px;
+	font-size: var(--settings-caption-size);
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
@@ -1459,7 +1479,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 	border-radius: 8px;
 	background: color-mix(in srgb, #d97706 7%, transparent);
 	color: #b45309;
-	font-size: 10px;
+	font-size: var(--settings-caption-size);
 }
 .skill-group {
 	display: grid;
@@ -1468,7 +1488,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 .skill-group h4 {
 	margin: 0;
 	color: var(--faint);
-	font-size: 10px;
+	font-size: var(--settings-caption-size);
 	font-weight: 500;
 }
 .skill-group h4 span {
@@ -1496,14 +1516,14 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 }
 .skill-copy strong {
 	color: var(--ink);
-	font-size: 12px;
+	font-size: var(--settings-section-heading-size);
 	font-weight: 550;
 }
 .skill-copy span {
 	display: -webkit-box;
 	overflow: hidden;
 	color: var(--faint);
-	font-size: 10px;
+	font-size: var(--settings-caption-size);
 	line-height: 1.45;
 	-webkit-box-orient: vertical;
 	-webkit-line-clamp: 2;
@@ -1514,7 +1534,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 	border-radius: 4px;
 	background: var(--sidebar);
 	color: var(--faint);
-	font-size: 9px;
+	font-size: var(--settings-metric-caption-size);
 }
 .provider-main {
 	display: grid;
@@ -1534,7 +1554,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 	align-items: center;
 	gap: 5px;
 	color: #16a34a;
-	font-size: 10px;
+	font-size: var(--settings-caption-size);
 }
 .provider-state.offline {
 	color: var(--faint);
@@ -1562,7 +1582,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 	color: var(--muted);
 	cursor: pointer;
 	font: inherit;
-	font-size: 12px;
+	font-size: var(--settings-body-size);
 }
 .provider-add:hover {
 	border-color: var(--accent);
@@ -1582,7 +1602,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 .provider-editor h4 {
 	margin: 0;
 	color: var(--ink);
-	font-size: 12px;
+	font-size: var(--settings-section-heading-size);
 	font-weight: 550;
 }
 .provider-form {
@@ -1605,7 +1625,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 	color: var(--faint);
 	cursor: pointer;
 	font: inherit;
-	font-size: 10px;
+	font-size: var(--settings-body-size);
 }
 .provider-add-mode button.active {
 	background: var(--surface);
@@ -1623,14 +1643,14 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 }
 .provider-form label {
 	color: var(--muted);
-	font-size: 11px;
+	font-size: var(--settings-body-size);
 }
 .provider-check {
 	display: flex;
 	align-items: center;
 	gap: 7px;
 	color: var(--muted);
-	font-size: 11px;
+	font-size: var(--settings-body-size, 13px);
 }
 .provider-check input {
 	width: 13px;
@@ -1647,7 +1667,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 }
 .provider-advanced summary {
 	color: var(--muted);
-	font-size: 11px;
+	font-size: var(--settings-body-size, 13px);
 	cursor: pointer;
 }
 .provider-advanced[open] summary {
@@ -1668,7 +1688,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 .advanced-grid > label {
 	align-self: end;
 	color: var(--muted);
-	font-size: 11px;
+	font-size: var(--settings-body-size, 13px);
 }
 .custom-models {
 	display: grid;
@@ -1708,7 +1728,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 .custom-model-copy strong {
 	overflow: hidden;
 	color: var(--ink);
-	font-size: 13px;
+	font-size: var(--settings-body-size);
 	font-weight: 500;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -1723,7 +1743,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 	border: 1px solid var(--line-soft);
 	border-radius: 4px;
 	color: var(--faint);
-	font-size: 9px;
+	font-size: var(--settings-metric-caption-size);
 }
 .custom-model-actions {
 	display: flex;
@@ -1778,7 +1798,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 }
 .model-editor-head strong {
 	color: var(--ink);
-	font-size: 11px;
+	font-size: var(--settings-section-heading-size, 14px);
 	font-weight: 600;
 }
 .advanced-block {
@@ -1787,7 +1807,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 }
 .advanced-block > span {
 	color: var(--muted);
-	font-size: 11px;
+	font-size: var(--settings-body-size, 13px);
 }
 .advanced-chips {
 	display: flex;
@@ -1801,7 +1821,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 	background: var(--surface);
 	color: var(--muted);
 	font: inherit;
-	font-size: 10px;
+	font-size: var(--settings-body-size, 13px);
 	cursor: pointer;
 }
 .advanced-chip:hover:not(:disabled) {
@@ -1834,7 +1854,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 .settings-card h4 {
 	margin: 0;
 	color: var(--ink);
-	font-size: 12px;
+	font-size: var(--settings-section-heading-size);
 	font-weight: 550;
 }
 .card-head {
@@ -1846,7 +1866,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 .settings-muted {
 	margin: 0;
 	color: var(--faint);
-	font-size: 10px;
+	font-size: var(--settings-caption-size);
 	line-height: 1.65;
 }
 .settings-card code {
@@ -1856,7 +1876,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 	background: var(--sidebar);
 	color: var(--muted);
 	font-family: "Cascadia Code", Consolas, monospace;
-	font-size: 10px;
+	font-size: var(--settings-caption-size);
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
@@ -1886,12 +1906,12 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 }
 .account-card strong {
 	color: var(--ink);
-	font-size: 13px;
+	font-size: var(--settings-section-heading-size);
 	font-weight: 550;
 }
 .account-card span:not(.account-avatar) {
 	color: var(--faint);
-	font-size: 10px;
+	font-size: var(--settings-caption-size);
 }
 .metric-list {
 	display: grid;
@@ -1907,11 +1927,11 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 }
 .metric-list span {
 	color: var(--faint);
-	font-size: 9px;
+	font-size: var(--settings-metric-caption-size);
 }
 .metric-list strong {
 	color: var(--ink);
-	font-size: 16px;
+	font-size: var(--settings-metric-size);
 	font-weight: 550;
 }
 .theme-options {
@@ -1930,7 +1950,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 	color: var(--muted);
 	cursor: pointer;
 	font: inherit;
-	font-size: 11px;
+	font-size: var(--settings-body-size);
 }
 .theme-options button.active {
 	border-color: var(--accent);
@@ -1945,13 +1965,13 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 	justify-content: space-between;
 	gap: 10px;
 	color: var(--faint);
-	font-size: 11px;
+	font-size: var(--settings-body-size);
 }
 .setting-row strong {
 	overflow: hidden;
 	max-width: 70%;
 	color: var(--ink);
-	font-size: 11px;
+	font-size: var(--settings-body-size);
 	font-weight: 450;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -1977,14 +1997,14 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 }
 .extension-list strong {
 	color: var(--ink);
-	font-size: 11px;
+	font-size: var(--settings-body-size);
 	font-weight: 500;
 }
 .extension-list span {
 	overflow: hidden;
 	color: var(--faint);
 	font-family: "Cascadia Code", Consolas, monospace;
-	font-size: 9px;
+	font-size: var(--settings-caption-size);
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
@@ -1994,7 +2014,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 }
 .settings-form label {
 	color: var(--muted);
-	font-size: 11px;
+	font-size: var(--settings-body-size);
 }
 .settings-form button[type="submit"] {
 	justify-self: start;

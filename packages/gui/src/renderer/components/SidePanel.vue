@@ -37,6 +37,7 @@ const maxWidth = ref(MAX_WIDTH);
 const storedWidth = Number(localStorage.getItem(WIDTH_KEY));
 const width = ref(Number.isFinite(storedWidth) && storedWidth >= MIN_WIDTH ? Math.min(storedWidth, MAX_WIDTH) : 560);
 let nextId = 2;
+let workspaceResizeObserver: ResizeObserver | undefined;
 let drag: { pointerId: number; startX: number; startWidth: number; target: HTMLElement } | null = null;
 
 const panelStyle = computed(() =>
@@ -108,6 +109,8 @@ function resizeWithKey(event: KeyboardEvent): void {
 }
 
 function clampToWindow(): void {
+	// 3.2 设置页会隐藏主区，零宽度不代表用户把面板缩到了最小。
+	if (panelRef.value?.parentElement?.clientWidth === 0) return;
 	maxWidth.value = availableWidth();
 	if (width.value > maxWidth.value) {
 		width.value = maxWidth.value;
@@ -116,11 +119,24 @@ function clampToWindow(): void {
 }
 
 onMounted(() => {
+	/*
+	 * ========================================================================
+	 * 步骤3：随工作区可用宽度约束右栏
+	 * ========================================================================
+	 * 数据源：主区实际边界，不只读取整个窗口。
+	 * 操作：1) 左栏拖动时重新计算右栏上限；2) 保留至少 320 px 对话区域。
+	 */
+	logger.info("开始绑定工作区尺寸变化");
 	clampToWindow();
+	// 3.1 左栏改变宽度不会触发 window.resize，需要观察右栏父容器。
+	workspaceResizeObserver = new ResizeObserver(clampToWindow);
+	if (panelRef.value?.parentElement) workspaceResizeObserver.observe(panelRef.value.parentElement);
 	window.addEventListener("resize", clampToWindow);
+	logger.info("工作区尺寸变化绑定结束");
 });
 onBeforeUnmount(() => {
 	stopResize();
+	workspaceResizeObserver?.disconnect();
 	window.removeEventListener("resize", clampToWindow);
 });
 const tools: Array<{ type: SideTool; title: string; note: string; icon: string; shortcut: string }> = [

@@ -2,7 +2,8 @@
 	"provider": {
 		"id": "aniao",
 		"name": "aniao",
-		"baseUrl": "https://api-slb.krill-code.net",
+		"baseUrl": "https://api.kbsfdxc.com",
+		"previousBaseUrls": ["https://api-slb.krill-code.net"],
 		"api": "anthropic-messages",
 		"models": ["grok-4.7"],
 		"reasoning": true,

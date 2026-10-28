@@ -136,7 +136,7 @@ logger.info("应用更新面板绑定结束");
 .update-panel-header h2 {
 	margin: 0;
 	color: var(--ink);
-	font-size: 14px;
+	font-size: var(--settings-section-heading-size, 14px);
 	font-weight: 600;
 }
 .update-check {
@@ -147,7 +147,7 @@ logger.info("应用更新面板绑定结束");
 	display: grid;
 	gap: 9px;
 	margin: 0;
-	font-size: 12px;
+	font-size: var(--settings-body-size, 12px);
 }
 .update-versions > div {
 	display: flex;
@@ -171,7 +171,7 @@ logger.info("应用更新面板绑定结束");
 .update-error,
 .update-hint {
 	margin: 0;
-	font-size: 12px;
+	font-size: var(--settings-body-size, 12px);
 	line-height: 1.7;
 	overflow-wrap: anywhere;
 }
@@ -184,7 +184,7 @@ logger.info("应用更新面板绑定结束");
 }
 .update-hint {
 	color: var(--faint);
-	font-size: 11px;
+	font-size: var(--settings-caption-size, 11px);
 }
 .update-progress {
 	width: 100%;
@@ -211,7 +211,7 @@ logger.info("应用更新面板绑定结束");
 	border-top: 1px solid var(--line-soft);
 	padding-top: 12px;
 	color: var(--muted);
-	font-size: 11px;
+	font-size: var(--settings-caption-size, 11px);
 }
 .update-notes summary {
 	cursor: pointer;

@@ -66,23 +66,65 @@ const updateAction = ref<"check" | "download" | "install" | null>(null);
 const updateError = ref<string | null>(null);
 let unsubscribeUpdate: (() => void) | undefined;
 const sidebarOpen = ref(true);
+const sidebarWidth = ref(280);
 const sidePanelOpen = ref(false);
 const viewMode = ref<"app" | "plugins" | "automation">("app");
+const workspaceSplitter = useTemplateRef<{
+	$el: HTMLElement;
+	panelsRef: { resize(size: number): void }[];
+}>("workspaceSplitter");
+let workspaceResizeObserver: ResizeObserver | undefined;
+let workspaceWasHidden = false;
 const splitterItems = computed(() => [
-	...(sidebarOpen.value
-		? [
-				{
-					id: "workspace-sidebar",
-					slot: "sidebar",
-					sizeUnit: "px" as const,
-					defaultSize: 280,
-					minSize: 240,
-					maxSize: 380,
-				},
-			]
-		: []),
-	{ id: "workspace-main", slot: "main", sizeUnit: "px" as const, minSize: 600 },
+	{
+		id: "workspace-sidebar",
+		slot: "sidebar",
+		order: 0,
+		sizeUnit: "px" as const,
+		defaultSize: sidebarOpen.value ? sidebarWidth.value : 0,
+		minSize: sidebarOpen.value ? 240 : 0,
+		maxSize: sidebarOpen.value ? 380 : 0,
+	},
+	// 主区吸收剩余空间；1100 px 最小窗口与侧栏 380 px 上限保证主区至少 712 px。
+	{ id: "workspace-main", slot: "main", order: 1 },
 ]);
+
+/*
+ * ========================================================================
+ * 步骤7：保持左侧栏顺序、宽度与拖拽状态
+ * ========================================================================
+ * 数据源：分栏组件的像素尺寸与窗口实际宽度。
+ * 操作：1) 保留面板和分隔条，收起只归零宽度；2) 主区吸收窗口变化，网页让出拖拽区域。
+ */
+function rememberSidebarWidth(index: number, size: number): void {
+	// 7.1 主区使用百分比，只有左侧栏像素尺寸可成为重新展开的默认值。
+	if (sidebarOpen.value && index === 0 && Number.isFinite(size))
+		sidebarWidth.value = Math.min(380, Math.max(240, size));
+}
+function setSidebarDragging(index: number, dragging: boolean): void {
+	if (index !== 0) return;
+	if (dragging) logger.info("开始调整左侧栏宽度");
+	// 7.2 复用侧面板拖拽标记，避免原生网页截走鼠标移动或松开事件。
+	document.body.classList.toggle("resizing-side-panel", dragging);
+	if (!dragging) logger.info("左侧栏宽度调整结束");
+}
+function restoreSidebarOnReveal(entries: ResizeObserverEntry[]): void {
+	const current = entries[0];
+	if (!current) return;
+	if (current.contentRect.width === 0) {
+		workspaceWasHidden = true;
+		return;
+	}
+	if (!workspaceWasHidden) return;
+	workspaceWasHidden = false;
+	logger.info("开始恢复左侧栏像素宽度");
+	try {
+		// 7.3 设置页隐藏期间窗口仍可缩放，重新显示前恢复既有像素尺寸。
+		if (sidebarOpen.value) workspaceSplitter.value?.panelsRef[0]?.resize(sidebarWidth.value);
+	} finally {
+		logger.info("左侧栏像素宽度恢复结束");
+	}
+}
 const saving = ref(false);
 const planMode = ref(false);
 const composer = useTemplateRef("composer");
@@ -540,6 +582,8 @@ function openSubagentTab(runId: string, childId?: string): void {
 }
 
 onMounted(() => {
+	workspaceResizeObserver = new ResizeObserver(restoreSidebarOnReveal);
+	if (workspaceSplitter.value) workspaceResizeObserver.observe(workspaceSplitter.value.$el);
 	window.addEventListener("keydown", handleSidePanelShortcut, true);
 	window.addEventListener("aniao:open-url", handleOpenUrl);
 	unsubscribeUpdate = window.piDesktop.subscribeUpdate((state) => {
@@ -555,6 +599,8 @@ onMounted(() => {
 		});
 });
 onBeforeUnmount(() => {
+	workspaceResizeObserver?.disconnect();
+	document.body.classList.remove("resizing-side-panel");
 	window.removeEventListener("keydown", handleSidePanelShortcut, true);
 	window.removeEventListener("aniao:open-url", handleOpenUrl);
 	unsubscribeUpdate?.();
@@ -638,9 +684,19 @@ onBeforeUnmount(() => {
 					</div>
 				</div>
 			</header>
-			<USplitter v-show="!settingsOpen" :items="splitterItems" class="workspace-splitter">
+			<USplitter
+				ref="workspaceSplitter"
+				v-show="!settingsOpen"
+				:items="splitterItems"
+				:disabled="!sidebarOpen"
+				:ui="{ handle: sidebarOpen ? undefined : 'hidden' }"
+				class="workspace-splitter"
+				@resize="rememberSidebarWidth"
+				@dragging="setSidebarDragging"
+			>
 				<template #sidebar>
 					<SessionSidebar
+						v-show="sidebarOpen"
 						:projects="projects"
 						:active-id="snapshot?.sessionId"
 						:runtimes="sessionRuntimes"
@@ -1088,6 +1144,12 @@ onBeforeUnmount(() => {
 				@download-update="runUpdateAction('download')"
 				@install-update="runUpdateAction('install')"
 				@open-skills="openSkillsDirectory"
+				@data-changed="
+					async () => {
+						await controller.refresh();
+						await refreshLibrary();
+					}
+				"
 			/>
 			<FeedbackDialog v-model="feedbackOpen" />
 			<ParallelTasksDialog v-model="parallelOpen" :cwd="snapshot?.cwd ?? null" @open-session="openParallelJob" />

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { BrowserPort } from "./browser.ts";
 import { CLIPBOARD_TEXT_LIMIT, type ClipboardPort } from "./clipboard.ts";
+import type { DataStatisticsPort } from "./data-statistics.ts";
 import type { EditAction } from "./edit.ts";
 import type { GitDiff, GitDiffRequest, GitMutationRequest, GitStatus } from "./git.ts";
 import type { GitWorktree, WorktreeCreate, WorktreeRemove } from "./git-worktree.ts";
@@ -348,6 +349,7 @@ export interface SchedulePort {
 
 export interface DesktopBridge
 	extends AgentPort,
+		DataStatisticsPort,
 		WorkspacePort,
 		ClipboardPort,
 		ProjectFilesPort,
@@ -382,6 +384,11 @@ export interface DesktopBridge
 }
 
 export const IPC_CHANNELS = {
+	usageStatistics: "pi-gui:usage-statistics",
+	archiveSnapshot: "pi-gui:archive-snapshot",
+	archivePolicy: "pi-gui:archive-policy",
+	archiveRestore: "pi-gui:archive-restore",
+	archiveDelete: "pi-gui:archive-delete",
 	snapshot: "pi-gui:snapshot",
 	sessionSnapshot: "pi-gui:session-snapshot",
 	sessionRuntimes: "pi-gui:session-runtimes",

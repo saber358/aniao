@@ -7,6 +7,12 @@ import {
 	browserNavigateSchema,
 	browserStateSchema,
 } from "../shared/browser.ts";
+import {
+	archivePolicySchema,
+	archiveSelectionSchema,
+	archiveSnapshotSchema,
+	usageSnapshotSchema,
+} from "../shared/data-statistics.ts";
 import { editActionSchema } from "../shared/edit.ts";
 import { gitDiffRequestSchema, gitMutationRequestSchema, gitStatusRequestSchema } from "../shared/git.ts";
 import { worktreeCreateSchema, worktreeRemoveSchema } from "../shared/git-worktree.ts";
@@ -76,6 +82,20 @@ const logger = createLogger("preload");
  */
 logger.info("开始安装桌面业务桥");
 const bridge: DesktopBridge = {
+	getUsageStatistics: async () => usageSnapshotSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.usageStatistics)),
+	getArchiveSnapshot: async () => archiveSnapshotSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.archiveSnapshot)),
+	saveArchivePolicy: async (policy) =>
+		archiveSnapshotSchema.parse(
+			await ipcRenderer.invoke(IPC_CHANNELS.archivePolicy, archivePolicySchema.parse(policy)),
+		),
+	restoreArchived: async (selection) =>
+		archiveSnapshotSchema.parse(
+			await ipcRenderer.invoke(IPC_CHANNELS.archiveRestore, archiveSelectionSchema.parse(selection)),
+		),
+	deleteArchived: async (selection) =>
+		archiveSnapshotSchema.parse(
+			await ipcRenderer.invoke(IPC_CHANNELS.archiveDelete, archiveSelectionSchema.parse(selection)),
+		),
 	// 1.1 快照和事件从 unknown 校验，不能把宿主对象直接带入页面。
 	getSnapshot: async () => snapshotSchema.nullable().parse(await ipcRenderer.invoke(IPC_CHANNELS.snapshot)),
 	getSessionSnapshot: async (identity) =>

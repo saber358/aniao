@@ -4,6 +4,10 @@
 
 ### Added
 
+- Added settings usage statistics from real local SDK history, with token totals, session peak, chat duration, activity streaks, a yearly heatmap, selectable daily trends and model breakdowns; scans run in an isolated read-only process without model calls.
+
+- Added archive management with search, sorting, project groups, restoration, confirmation before deletion to the system trash, and persisted automatic archiving that skips pinned or running sessions and respects manual restoration.
+
 - Added separate Windows x64 NSIS and Linux amd64 Debian packages with platform/architecture filenames, isolated Linux update metadata and an explicit Linux node-pty rebuild before packaging.
 
 - Added image tabs opened from workspace files, with PNG/JPEG/GIF/WebP/SVG previews, image dimensions, zoom, original size, automatic panel fitting and retry after read or decoding failures. See [image previews](docs/image-preview.md).
@@ -81,6 +85,10 @@
 
 ### Changed
 
+- Unified settings content width and increased page, card and body typography; tightened usage charts, date controls and archive groups, with immediate activity tooltips and zero-token models omitted from daily hover details.
+
+- Changed the bundled Aniao grok-4.7 base URL to `https://api.kbsfdxc.com`; initialized installations migrate only the registered legacy URL with matching API/model, retain a backup and preserve credentials, custom addresses and other model fields.
+
 - Keep workspace and session positions fixed when navigating, retain explicit pinning, show available sessions directly for other workspaces, widen and center settings content, and move the Changes entry exclusively into the right panel.
 
 - Enlarged the startup animation window to the same 1320 × 880 bounds as the initialization workbench, with a prominent centered wordmark, nearby loading state, subtle fading grid and responsive browser previews.
@@ -103,6 +111,8 @@
 - Application updates now require an explicit download click from the sidebar, General Settings, or Help; automatic checks only fetch metadata, and all three entry points share progress and retry state.
 
 ### Fixed
+
+- Fix reversed sidebar resizing and lost widths after reopening by retaining panel registration and order, keep pixel width stable across window changes, and clamp the right panel to preserve conversation space while native pages yield during left-sidebar drags.
 
 - Keep sidebar typography, spacing, icons and menu slots unchanged when selecting a session, using the same rows and pagination for every workspace; only sessions show a selected background.
 

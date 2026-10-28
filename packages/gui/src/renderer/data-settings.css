@@ -1,0 +1,112 @@
+.data-settings {
+	--data-card: #f0f0f0;
+	--data-control: #e9e9e9;
+	--data-cell: #e6e6e6;
+	--data-muted: #808080;
+	--data-line: #00000016;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	align-content: start;
+	gap: 30px;
+	width: var(--settings-content-width);
+	min-width: 0;
+	max-width: 100%;
+	margin: 0 auto;
+	color: var(--ink);
+	font-size: var(--settings-body-size);
+}
+.data-settings > * {
+	min-width: 0;
+}
+.dark .data-settings {
+	--data-card: #232324;
+	--data-control: #2c2c2e;
+	--data-cell: #2c2c2e;
+	--data-muted: #a4a4a7;
+	--data-line: #ffffff18;
+}
+.settings-content.data-settings-content {
+	background: #f8f8f8;
+	padding-top: 38px;
+	padding-bottom: 50px;
+}
+.dark .settings-content.data-settings-content {
+	background: #1b1b1c;
+}
+.data-heading {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	margin-bottom: 0;
+}
+.data-heading h2 {
+	margin: 0;
+	font-size: var(--settings-heading-size);
+	font-weight: 600;
+}
+.data-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 18px;
+}
+.data-muted {
+	color: var(--data-muted);
+	font-size: var(--settings-caption-size);
+}
+.data-error {
+	color: #c13629;
+	font-size: var(--settings-body-size);
+	margin: 0;
+}
+.data-segmented {
+	display: flex;
+	align-items: center;
+	gap: 0;
+	padding: 3px;
+	border-radius: 24px;
+	background: var(--data-control);
+}
+.data-segmented button {
+	padding: 3px 12px;
+	border-radius: 20px;
+	color: var(--data-muted);
+	font-size: var(--settings-body-size);
+	white-space: nowrap;
+}
+.data-segmented button.active {
+	background: var(--surface);
+	color: var(--ink);
+}
+.data-footer {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 10px;
+}
+.data-button {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: var(--settings-body-size, 13px);
+	padding: 7px 12px;
+	border: 1px solid var(--data-line, var(--line));
+	border-radius: 8px;
+}
+.data-button:hover {
+	background: var(--hover);
+}
+.data-button.danger {
+	color: #c13629;
+	background: #c1362912;
+	border-color: #c1362930;
+}
+.data-settings button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+.data-settings button:focus-visible,
+.data-settings select:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}

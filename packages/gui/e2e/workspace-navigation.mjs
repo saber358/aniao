@@ -470,7 +470,7 @@ try {
 
 	/*
 	 * ========================================================================
-	 * 步骤4：设置内容以右侧区域中心线对齐并利用可用宽度
+	 * 步骤4：所有设置分类使用同一居中宽度
 	 * ========================================================================
 	 * 数据源：实际窗口内的设置内容边界与多分类页面。
 	 * 操作：1) 测量左右间距；2) 长表单可滚动，最小窗口无横向溢出。
@@ -479,14 +479,24 @@ try {
 	await page.keyboard.press("Control+,");
 	await page.locator(".settings-page").waitFor({ state: "visible" });
 	const settings = [];
-	for (const label of ["账号与余额", "通用设置", "模型", "技能", "Agent 预设"]) {
+	for (const label of [
+		"账号与余额",
+		"通用设置",
+		"模型",
+		"MCP 服务器",
+		"技能",
+		"插件",
+		"Agent 预设",
+		"使用统计",
+		"归档管理",
+	]) {
 		await page
 			.getByRole("navigation", { name: "设置分类", exact: true })
 			.getByRole("button", { name: label, exact: true })
 			.click();
 		const geometry = await page.locator(".settings-content").evaluate((element) => {
 			const outer = element.getBoundingClientRect();
-			const inner = element.querySelector(".settings-section").getBoundingClientRect();
+			const inner = element.querySelector(".settings-section, .data-settings").getBoundingClientRect();
 			return {
 				width: inner.width,
 				centerOffset: Math.abs(outer.x + outer.width / 2 - inner.x - inner.width / 2),
@@ -494,7 +504,8 @@ try {
 			};
 		});
 		assert(geometry.centerOffset < 2, `${label}偏离右侧中心线`);
-		assert(geometry.width >= 1000 && geometry.width < geometry.available, `${label}仍然过窄`);
+		assert(geometry.width > 300 && geometry.width <= 832, `${label}没有采用统一宽度`);
+		if (settings.length) assert(Math.abs(geometry.width - settings[0].width) < 1, `${label}与其他分类宽度不同`);
 		settings.push({ label, ...geometry });
 	}
 	await page.getByRole("button", { name: "模型", exact: true }).click();
@@ -512,7 +523,11 @@ try {
 	await page.screenshot({ path: join(artifacts, "settings-minimum.png"), scale: "css" });
 	await page.getByRole("button", { name: "返回工作区", exact: true }).click();
 	assert.equal(await web.getByRole("textbox", { name: "保留输入", exact: true }).inputValue(), "原生页面状态保留");
-	checks.push("settings-right-column-centered", "settings-wider", "settings-long-form-and-minimum-window");
+	checks.push(
+		"settings-right-column-centered",
+		"all-settings-share-content-width",
+		"settings-long-form-and-minimum-window",
+	);
 	logger.info("设置内容居中与宽度核对结束");
 
 	/*

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
+import { type ArchivePolicy, archivePolicySchema } from "../shared/data-statistics.ts";
 import type { Logger } from "../shared/logger.ts";
 import {
 	type Draft,
@@ -23,6 +24,8 @@ const indexSchema = z.object({
 	projects: z.array(z.string().min(1).max(4096)).max(500).default([]),
 	projectNames: z.record(z.string().min(1).max(4096), z.string().min(1).max(100)).default({}),
 	sessions: z.array(savedSessionSchema).max(20000),
+	archivePolicy: archivePolicySchema.default({ enabled: false, retentionDays: 7 }),
+	archiveRestoredAt: z.record(sessionIdSchema, z.number().nonnegative()).default({}),
 });
 type Index = z.infer<typeof indexSchema>;
 type SavedSession = z.infer<typeof savedSessionSchema>;
@@ -64,7 +67,15 @@ export class WorkspaceStore {
 		} catch (error) {
 			if (!(error instanceof Error && "code" in error && error.code === "ENOENT"))
 				throw new Error("工作区索引无法读取，请保留原文件后检查");
-			this.index = { version: 1, active: null, projects: [], projectNames: {}, sessions: [] };
+			this.index = {
+				version: 1,
+				active: null,
+				projects: [],
+				projectNames: {},
+				sessions: [],
+				archivePolicy: { enabled: false, retentionDays: 7 },
+				archiveRestoredAt: {},
+			};
 		}
 		return this.index;
 	}
@@ -199,6 +210,81 @@ export class WorkspaceStore {
 			.map(({ cwd: _cwd, ...item }) => ({ ...item }));
 	}
 
+	/*
+	 * ========================================================================
+	 * 步骤3：原子保存归档策略和批量归档状态
+	 * ========================================================================
+	 * 数据源：桌面索引里的已登记会话，不接收外部文件路径。
+	 * 操作：1) 批量写入一次持久化；2) 删除身份时清除活动引用，其他会话位置不变。
+	 */
+	async allSessions(): Promise<SavedSession[]> {
+		await this.pending;
+		return (await this.readIndex()).sessions.map((item) => ({ ...item }));
+	}
+	async archivePolicy(): Promise<ArchivePolicy> {
+		await this.pending;
+		return { ...(await this.readIndex()).archivePolicy };
+	}
+	async archiveRestoredAt(): Promise<Record<string, number>> {
+		await this.pending;
+		return { ...(await this.readIndex()).archiveRestoredAt };
+	}
+	setArchivePolicy(policy: ArchivePolicy): Promise<void> {
+		return this.serialize(async () => {
+			this.logger.info("开始保存自动归档策略");
+			try {
+				const current = await this.readIndex();
+				const next = { ...current, archivePolicy: archivePolicySchema.parse(policy) };
+				await writeJsonAtomically(this.directory, "index.json", next, this.logger);
+				this.index = next;
+			} finally {
+				this.logger.info("自动归档策略保存结束");
+			}
+		});
+	}
+	setArchived(sessionIds: string[], archived: boolean): Promise<void> {
+		return this.serialize(async () => {
+			this.logger.info("开始批量更新归档状态");
+			try {
+				const current = await this.readIndex();
+				const ids = new Set(sessionIds);
+				if (current.sessions.filter((item) => ids.has(item.id)).length !== ids.size)
+					throw new Error("部分会话已不在列表中");
+				const archiveRestoredAt = { ...current.archiveRestoredAt };
+				if (!archived) for (const id of ids) archiveRestoredAt[id] = Date.now();
+				const next = {
+					...current,
+					archiveRestoredAt,
+					sessions: current.sessions.map((item) => (ids.has(item.id) ? { ...item, archived } : item)),
+				};
+				await writeJsonAtomically(this.directory, "index.json", next, this.logger);
+				this.index = next;
+			} finally {
+				this.logger.info("归档状态批量更新结束");
+			}
+		});
+	}
+	forgetSession(sessionId: string): Promise<void> {
+		return this.serialize(async () => {
+			this.logger.info("开始移除已删除会话身份");
+			try {
+				const current = await this.readIndex();
+				const archiveRestoredAt = { ...current.archiveRestoredAt };
+				delete archiveRestoredAt[sessionId];
+				const next = {
+					...current,
+					archiveRestoredAt,
+					active: current.active?.id === sessionId ? null : current.active,
+					sessions: current.sessions.filter((item) => item.id !== sessionId),
+				};
+				await writeJsonAtomically(this.directory, "index.json", next, this.logger);
+				this.index = next;
+			} finally {
+				this.logger.info("已删除会话身份移除结束");
+			}
+		});
+	}
+
 	remember(cwd: string, session: SessionItem, active = false): Promise<void> {
 		return this.serialize(async () => {
 			this.logger.info("开始保存会话组织信息");
@@ -238,7 +324,12 @@ export class WorkspaceStore {
 				const index = current.sessions.findIndex((item) => item.cwd === cwd && item.id === change.sessionId);
 				if (index < 0) throw new Error("会话已不在当前项目中");
 				const { sessionId: _id, ...patch } = change;
-				const next = { ...current, sessions: [...current.sessions] };
+				const next = {
+					...current,
+					sessions: [...current.sessions],
+					archiveRestoredAt: { ...current.archiveRestoredAt },
+				};
+				if (change.archived === false) next.archiveRestoredAt[change.sessionId] = Date.now();
 				next.sessions[index] = { ...next.sessions[index], ...patch };
 				await writeJsonAtomically(this.directory, "index.json", next, this.logger);
 				this.index = next;

@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
+@import "./data-settings.css";
 
 :root {
 	color-scheme: light;

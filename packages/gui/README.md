@@ -14,11 +14,15 @@
 
 本包承载 Aniao Harness 桌面界面。Agent 循环、模型接入、工具执行和会话持久化复用现有 Pi 包。
 
-当前桌面分发版本为 `0.80.24`，内核为官方 Pi `1.4.0`。本版固定侧栏位置与字形，恢复跨工作区会话操作，修复切换闪烁并调整设置和右栏导航；提供 Windows x64 与 Linux amd64 `.deb`。发布产物与验收报告保存在 `artifacts/publish-0.80.24-20261028/`。`pi-ai`、`pi-agent-core`、`pi-coding-agent` 与 `pi-tui` 均固定为该内核版本，开发、测试和打包共用同一套发布包；仓库中的 `0.80.6` Pi 源码不再作为桌面入口。课程包 `packages/pi-course` 已按用户要求移除。
+当前桌面分发版本为 `0.80.25`，内核为官方 Pi `1.4.0`。本版新增使用统计与归档管理，统一设置字级和宽度，修复侧栏拖拽与宽度恢复，并更新 Aniao grok-4.7 地址；提供 Windows x64 与 Linux amd64 `.deb`。发布产物与验收报告保存在 `artifacts/publish-0.80.25-20261028/`。`pi-ai`、`pi-agent-core`、`pi-coding-agent` 与 `pi-tui` 均固定为该内核版本，开发、测试和打包共用同一套发布包；仓库中的 `0.80.6` Pi 源码不再作为桌面入口。课程包 `packages/pi-course` 已按用户要求移除。
 
 侧栏顶部提供品牌、“新会话”主按钮，以及已接通的插件和自动化任务入口。插件页展示当前资源，自动化页管理定时任务与后台任务。工作区按索引保存的顺序展示，打开会话不会把项目或会话移到前面；摘要刷新与重启保持原位置，新建会话放在前面，显式置顶仍有效。所有工作区使用相同的会话行，只有会话显示选中背景，工作区不显示选中背景；字号、字重、行高、缩进、图标和菜单占位保持一致。各工作区统一每批展示 50 个会话，不再显示“查看全部 X 个会话”，展开更多后切换会话不收回列表。显示名称统一为 Aniao Harness，包名、Pi 配置与数据目录沿用原标识。
 
 会话菜单支持所有工作区的重命名、置顶与归档，操作其他工作区不会切换当前会话。主进程按已登记身份查找目标目录，未打开的已保存历史由 SDK 追加名称记录，不创建 Agent 宿主。只有目标会话仍在运行时需要等待后再重命名；置顶与归档可在运行时修改。导航准备期间保留已有画面，目标快照和草稿就绪后才切换，侧栏不因导航整体变灰；列表摘要更新后再刷新项目，并丢弃迟到结果。
+
+左栏拖拽遵循 240–380 px 宽度限制。收起只隐藏并归零面板宽度，保留面板顺序、分隔条和本次窗口内的用户宽度；再次展开后鼠标与键盘方向不变。窗口缩放由主区吸收，设置页隐藏期间缩放也会在返回时恢复左栏宽度。左栏拖拽时原生网页暂时让出鼠标区域，结束后恢复同一网页；窄窗口中右栏会随可用空间收窄，至少保留 320 px 对话区。
+
+设置新增「数据与统计」分组。「使用统计」读取本机真实 SDK 历史，展示累计与峰值 Token、最长聊天时长、连续天数、年度热力图、近 7/30 日趋势和模型占比。「归档管理」支持自动归档策略、搜索排序、项目分组、取消归档和带确认的删除；跳过置顶及运行会话，删除历史送入系统回收站，项目文件保留。数据口径与进程边界见 [设置数据说明](docs/settings-data.md)。
 
 完整设计见 [实施方案](IMPLEMENTATION_PLAN.md)。方案分别覆盖界面、交互、展示、功能，并标明现有接口、缺口、开发顺序和验收条件。
 
@@ -61,7 +65,7 @@
 
 侧栏「自动化任务」切换到自动化页，按分钟间隔运行后台会话。任务可暂停、恢复、立即运行或删除，并显示最近运行结果和失败原因。任务与运行记录会持久化；应用关闭或电脑休眠后按任务的补跑策略执行一次或跳到下次，未完成任务不会自动重放。
 
-侧栏底部的设置图标打开设置页面：账号与认证概览、通用外观设置、模型与 Provider 认证、MCP、技能、插件和当前 Agent 配置。右侧内容按可用区域中心线对齐，最大宽度为 1100 px；窗口变窄时保留对称间距，长表单独立滚动。模型页列出已配置 Provider，可编辑凭据、添加内置 Provider，或通过「自定义 API」填写 Base URL、API 类型、模型 ID 和 Key 接入 OpenAI-compatible、Anthropic 或 Google 接口；自定义模型可启用思考/推理能力。模型页支持删除已配置 Provider：自定义 Provider 会删除 `models.json` 配置和本地凭据，内置 Provider 只移除本地凭据，之后可重新配置；也可直接打开 `models.json`。账号余额和独立 Agent 预设尚未接入。
+侧栏底部的设置图标打开设置页面：账号与认证概览、通用外观设置、模型与 Provider 认证、MCP、技能、插件和当前 Agent 配置。所有设置分类与使用统计、归档管理共用居中宽度，取可用内容区的 2/3、最大 832 px；窗口变窄时保留对称间距，长表单独立滚动。模型页列出已配置 Provider，可编辑凭据、添加内置 Provider，或通过「自定义 API」填写 Base URL、API 类型、模型 ID 和 Key 接入 OpenAI-compatible、Anthropic 或 Google 接口；自定义模型可启用思考/推理能力。模型页支持删除已配置 Provider：自定义 Provider 会删除 `models.json` 配置和本地凭据，内置 Provider 只移除本地凭据，之后可重新配置；也可直接打开 `models.json`。账号余额和独立 Agent 预设尚未接入。
 
 服务商设置支持 Pi ModelRuntime 中的 OAuth 登录、退出和重新登录。登录方式选择、设备码、浏览器链接与手工授权输入均由 Provider 交互产生。授权码只作为交互回复交给宿主；access / refresh token 不进入快照、聊天或草稿。登录总时限十分钟，单个交互默认五分钟，可取消；浏览器回调完成时可单独关闭手工码提示，不取消整个登录。关闭设置后仍有登录进度与取消入口；Renderer 重载保留正在等待的交互，应用重启不恢复未完成登录。登录成功后等待异步模型刷新，凭据仍按原格式保存在 Pi 的 `auth.json`。
 
@@ -137,7 +141,7 @@ Linux 包声明 `glibc >= 2.34` 与 GTK/NSS/音频等运行依赖，由 apt 检�
 
 安装包启用 asar，宿主入口和原生模块放在 asar 外；SDK 的主题与资源复制到 `resources/sdk`，主进程在 packaged 模式下把 `PI_PACKAGE_DIR` 指向该目录。Debian 系安装命令为 `sudo apt install ./Aniao-Harness-<版本>-linux-amd64.deb`。桌面快捷方式与命令 `aniao-harness` 均可启动。
 
-桌面分发版本由 `electron-builder.yml` 的 `extraMetadata.version` 指定，当前为 `0.80.24`；不改动共享 SDK 包版本。发布新桌面版本时须递增该值，客户端比较的是安装包中的应用版本。可用 `--config.directories.output=<目录>` 保留此前产物。
+桌面分发版本由 `electron-builder.yml` 的 `extraMetadata.version` 指定，当前为 `0.80.25`；不改动共享 SDK 包版本。发布新桌面版本时须递增该值，客户端比较的是安装包中的应用版本。可用 `--config.directories.output=<目录>` 保留此前产物。
 
 默认 Provider 通过构建时环境变量注入：
 
@@ -146,7 +150,7 @@ $env:ANIAO_DEFAULT_API_KEY="..."
 npm run package:win --workspace @earendil-works/pi-gui
 ```
 
-构建脚本把 `resources/default-provider.json` 与密钥合并到 `build/default-provider.json`，再作为 `resources/defaults/provider.json` 打进安装包。启动时会把默认 Provider 合并到用户配置：只补充缺失的 Provider、认证和默认模型，已有 Provider、默认模型及其他设置保持不变；写入后留下标记，用户主动删除默认 Provider 后不会再被加回。密钥文件被 `.gitignore` 忽略，不进入 Git，但仍可从安装包提取，不能作为真正的秘密保护；轮换密钥后必须重新构建安装包。
+构建脚本把 `resources/default-provider.json` 与密钥合并到 `build/default-provider.json`，再作为 `resources/defaults/provider.json` 打进安装包。启动时会把默认 Provider 合并到用户配置：只补充缺失的 Provider、认证和默认模型，已有 Provider、默认模型及其他设置保持不变；写入后留下标记，用户主动删除默认 Provider 后不会再被加回。`0.80.25` 对已初始化用户增加地址迁移：仅当 Aniao 地址等于登记的旧默认值、协议及模型匹配时，备份 `models.json` 并原子替换为 `https://api.kbsfdxc.com`，其余字段和自定义地址保持不变。密钥文件被 `.gitignore` 忽略，不进入 Git，但仍可从安装包提取，不能作为真正的秘密保护；轮换密钥后必须重新构建安装包。
 
 **内测更新**
 
@@ -178,6 +182,10 @@ $env:ELECTRON_BUILDER_BINARIES_MIRROR="https://npmmirror.com/mirrors/electron-bu
 **检查与验收**
 
 开发服务运行时，在本包目录运行 `node e2e/workspace-navigation.mjs` 复跑侧栏导航验收。脚本核对深浅主题下的逐帧字形与节点稳定、跨工作区会话菜单、重启后的原生历史名称写入，以及右栏和设置回归；使用独立 profile、SDK 历史和离线配置，不发送模型请求。
+
+`node e2e/sidebar-resize.mjs` 验证左栏拖拽方向、连续收起展开、宽度上下限、键盘调整、窗口缩放、设置页期间缩放、窄窗口布局及原生网页输入保持。两组脚本都支持 `PI_GUI_PACKAGED_EXECUTABLE` 指向已打包程序。
+
+`node e2e/settings-data.mjs` 验证统计与归档的完整本机流程，使用独立 SDK 历史和精确已知用量，不访问真实账号，不调用模型。`test/usage-statistics.test.ts`、`test/archive-management.test.ts` 和 `test/session-data-client.test.ts` 覆盖日期、分支去重、自动归档保护、持久化、删除失败和只读进程清理。
 
 内置浏览器新增 9 项离线单测，覆盖地址和命令边界、隔离权限、布局裁切、旧标签和迟到事件、失败重试、下载保留及资源回收。`e2e/browser.mjs` 在真实 Electron 中验证禁止 iframe 的网页、地址与历史、刷新停止、新窗口链接复用、标签状态、弹窗层级、鼠标拖拽、360 px 深浅样式、1100 × 720 最小窗口、错误重试、下载提示和关闭清理；报告与原生窗口截图位于 `artifacts/browser-1792748509905/`，独立命令行复跑为 `artifacts/browser-1792748876971/results.json`。额外 30 秒交互检查通过，覆盖加载中修改地址、反复切换工具/设置和窗口/主题往返，见 `artifacts/browser-1792749043132/exploration.json`。全仓检查及浏览器、应用快捷键、启动窗口的 15 项聚焦测试通过。开发服务运行时可在本包目录运行 `node e2e/browser.mjs`，非默认端口用 `ELECTRON_RENDERER_URL` 指定。验收使用本机网页和独立认证，没有验证真实站点登录；本轮浏览器功能尚未打包发布。
 

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
+import type { ArchivePolicy, ArchiveSelection, ArchiveSnapshot } from "../shared/data-statistics.ts";
 import type { GoalReadRequest, GoalSnapshot } from "../shared/goals.ts";
 import type { ImageImport, ImageRead } from "../shared/images.ts";
 import type { Logger } from "../shared/logger.ts";
@@ -652,6 +653,123 @@ export class WorkspaceService {
 		} finally {
 			this.changing = false;
 			this.logger.info("会话组织更新结束");
+		}
+	}
+
+	/*
+	 * ========================================================================
+	 * 步骤10：管理跨工作区归档与自动清理候选
+	 * ========================================================================
+	 * 数据源：原子桌面索引、实时宿主和用户明确选中的身份。
+	 * 操作：1) 自动归档跳过置顶和非空闲会话；2) 删除前再次核对全部目标。
+	 */
+	async getArchiveSnapshot(): Promise<ArchiveSnapshot> {
+		const names = new Map<string, string>();
+		for (const cwd of await this.store.projects())
+			names.set(cwd, (await this.store.projectName(cwd)) ?? (basename(cwd) || "未归类"));
+		return {
+			policy: await this.store.archivePolicy(),
+			sessions: (await this.store.allSessions())
+				.filter((item) => item.archived)
+				.map((item) => ({
+					...item,
+					projectName: names.get(item.cwd) ?? (basename(item.cwd) || "未归类"),
+					running: [...this.hosts.values()].some(
+						(host) =>
+							host.runtime.sessionId === item.id && !host.host.isClosed && (host.phase !== "idle" || host.pending > 0),
+					),
+				})),
+		};
+	}
+	async saveArchivePolicy(policy: ArchivePolicy): Promise<ArchiveSnapshot> {
+		await this.store.setArchivePolicy(policy);
+		await this.autoArchive();
+		return this.getArchiveSnapshot();
+	}
+	async autoArchive(now = Date.now()): Promise<void> {
+		if (this.closed || this.changing) return;
+		this.changing = true;
+		this.logger.info("开始扫描自动归档候选");
+		try {
+			const policy = await this.store.archivePolicy();
+			if (!policy.enabled) return;
+			// 10.1 用磁盘摘要中的最后活动时间；宿主最新快照保护正在运行或交互的会话。
+			const protectedIds = new Set<string>();
+			for (const entry of this.hosts.values()) {
+				if (entry.host.isClosed) continue;
+				const state = await entry.host.getSnapshot();
+				if (entry.pending || state.run.phase !== "idle" || state.dialogs.length) protectedIds.add(state.sessionId);
+			}
+			const cutoff = now - policy.retentionDays * 86400000;
+			const restoredAt = await this.store.archiveRestoredAt();
+			const ids = (await this.store.allSessions())
+				.filter(
+					(item) =>
+						!item.archived &&
+						!item.pinned &&
+						Math.max(item.updatedAt, restoredAt[item.id] ?? 0) < cutoff &&
+						!protectedIds.has(item.id),
+				)
+				.map((item) => item.id);
+			if (ids.length) {
+				await this.store.setArchived(ids, true);
+				this.publishRuntimes();
+			}
+		} finally {
+			this.changing = false;
+			this.logger.info("自动归档候选扫描结束");
+		}
+	}
+	async restoreArchived(selection: ArchiveSelection): Promise<ArchiveSnapshot> {
+		if (this.closed || this.changing) throw new Error("请等待当前操作结束");
+		this.changing = true;
+		this.logger.info("开始恢复归档会话");
+		try {
+			const entries = await this.store.allSessions();
+			if (selection.sessionIds.some((id) => !entries.some((item) => item.id === id && item.archived)))
+				throw new Error("部分会话已不在归档中，请刷新");
+			await this.store.setArchived(selection.sessionIds, false);
+			this.publishRuntimes();
+			return await this.getArchiveSnapshot();
+		} finally {
+			this.changing = false;
+			this.logger.info("归档会话恢复结束");
+		}
+	}
+	async deleteArchived(
+		selection: ArchiveSelection,
+		removeHistory: (cwd: string, sessionId: string) => Promise<void>,
+	): Promise<ArchiveSnapshot> {
+		if (this.closed || this.changing) throw new Error("请等待当前操作结束");
+		this.changing = true;
+		this.logger.info("开始删除用户确认的归档会话");
+		try {
+			const ids = new Set(selection.sessionIds);
+			const entries = (await this.store.allSessions()).filter((item) => ids.has(item.id));
+			if (entries.length !== ids.size || entries.some((item) => !item.archived))
+				throw new Error("部分会话已不在归档中，请刷新");
+			const hosts = [...this.hosts.values()].filter((entry) => ids.has(entry.runtime.sessionId));
+			// 10.2 先检查全部目标，再开始任何文件操作，避免混入运行会话后只删半批。
+			for (const entry of hosts) {
+				if (!entry.host.isClosed && (entry.pending || (await entry.host.getSnapshot()).run.phase !== "idle"))
+					throw new Error("选中的会话仍在运行，请结束后再删除");
+			}
+			for (const entry of hosts) {
+				entry.release();
+				await entry.host.close();
+				this.hosts.delete(entry.host);
+				if (this.host === entry.host) this.host = null;
+				if (this.recentHosts.get(entry.runtime.cwd) === entry.host) this.recentHosts.delete(entry.runtime.cwd);
+			}
+			for (const item of entries) {
+				if (item.persisted) await removeHistory(item.cwd, item.id);
+				await this.store.forgetSession(item.id);
+			}
+			return await this.getArchiveSnapshot();
+		} finally {
+			this.changing = false;
+			this.publishRuntimes();
+			this.logger.info("用户确认的归档会话删除结束");
 		}
 	}
 

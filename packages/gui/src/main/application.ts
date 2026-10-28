@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, open, realpath, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
 	app,
@@ -21,6 +21,7 @@ import {
 	browserNavigateFileSchema,
 	browserNavigateSchema,
 } from "../shared/browser.ts";
+import { archivePolicySchema, archiveSelectionSchema } from "../shared/data-statistics.ts";
 import { editActionSchema } from "../shared/edit.ts";
 import { gitDiffRequestSchema, gitMutationRequestSchema, gitStatusRequestSchema } from "../shared/git.ts";
 import { worktreeCreateSchema, worktreeRemoveSchema } from "../shared/git-worktree.ts";
@@ -66,6 +67,7 @@ import { ParallelScheduler } from "./parallel-scheduler.ts";
 import { ProjectBrowser } from "./project-browser.ts";
 import { PtyService } from "./pty-service.ts";
 import { ScheduleService } from "./schedule-service.ts";
+import { SessionDataClient } from "./session-data-client.ts";
 import { StartupWindow } from "./startup-window.ts";
 import { UpdateService } from "./update-service.ts";
 import { UtilityHostClient } from "./utility-host-client.ts";
@@ -165,6 +167,13 @@ export async function startApplication(): Promise<void> {
 		logger,
 	);
 	cleanup.push(() => workspace.close());
+	const sessionData = new SessionDataClient(join(directory, "session-data.mjs"), logger);
+	cleanup.push(() => sessionData.close());
+	const archiveTimer = setInterval(() => {
+		void workspace.autoArchive().catch(() => logger.info("自动归档失败，保留原会话"));
+	}, 60000);
+	archiveTimer.unref();
+	cleanup.push(() => clearInterval(archiveTimer));
 	const git = new GitService();
 	const pty = new PtyService();
 	cleanup.push(() => pty.disposeAll());
@@ -471,6 +480,52 @@ export async function startApplication(): Promise<void> {
 	ipcMain.handle(IPC_CHANNELS.projects, (event) => {
 		verifySender(event);
 		return workspace.getProjects();
+	});
+	// 7.1 数据页只暴露摘要和身份；历史路径保留在主进程与只读扫描进程。
+	ipcMain.handle(IPC_CHANNELS.usageStatistics, async (event) => {
+		verifySender(event);
+		return (await sessionData.scan()).usage;
+	});
+	ipcMain.handle(IPC_CHANNELS.archiveSnapshot, async (event) => {
+		verifySender(event);
+		await workspace.autoArchive();
+		return workspace.getArchiveSnapshot();
+	});
+	ipcMain.handle(IPC_CHANNELS.archivePolicy, (event, input: unknown) => {
+		verifySender(event);
+		return workspace.saveArchivePolicy(archivePolicySchema.parse(input));
+	});
+	ipcMain.handle(IPC_CHANNELS.archiveRestore, (event, input: unknown) => {
+		verifySender(event);
+		return workspace.restoreArchived(archiveSelectionSchema.parse(input));
+	});
+	ipcMain.handle(IPC_CHANNELS.archiveDelete, async (event, input: unknown) => {
+		verifySender(event);
+		const selection = archiveSelectionSchema.parse(input);
+		const catalog = await sessionData.scan();
+		return workspace.deleteArchived(selection, async (cwd, sessionId) => {
+			const item = catalog.files.find((file) => file.id === sessionId && file.cwd === cwd);
+			if (!item) return;
+			// 7.2 只接受 SDK 索引确认的文件，送入系统回收站，禁止拼接 Renderer 路径。
+			const path = await realpath(item.path);
+			const root = await realpath(join(resolveAgentDirectory(), "sessions"));
+			const inside = relative(root, path);
+			if (!inside || inside.startsWith("..") || isAbsolute(inside)) throw new Error("会话历史路径已变化，请刷新");
+			const file = await open(path, "r");
+			try {
+				const buffer = Buffer.alloc(16384);
+				const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+				const header = JSON.parse(buffer.toString("utf8", 0, bytesRead).split("\n")[0]) as {
+					id?: unknown;
+					cwd?: unknown;
+				};
+				if (header.id !== sessionId || typeof header.cwd !== "string" || resolve(header.cwd) !== resolve(cwd))
+					throw new Error("会话历史身份已变化，请刷新");
+			} finally {
+				await file.close();
+			}
+			await shell.trashItem(path);
+		});
 	});
 	ipcMain.handle(IPC_CHANNELS.openWorkspace, (event, input: unknown) => {
 		verifySender(event);
