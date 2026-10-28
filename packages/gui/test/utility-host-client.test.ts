@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { type UtilityProcess, utilityProcess } from "electron";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UtilityHostClient } from "../src/main/utility-host-client.ts";
+import type { BuiltinCall } from "../src/shared/builtin-mcp.ts";
 import { type HostRequest, hostResponseSchema, type PortNotification } from "../src/shared/protocol.ts";
 import { snapshot } from "./fixtures.ts";
 
@@ -27,6 +28,59 @@ class ChildProcessFixture extends EventEmitter {
  *   2) 退出、协议错误和超时均结束等待，不重放命令
  */
 describe("UtilityHostClient", () => {
+	/*
+	 * ========================================================================
+	 * 步骤6：验证模型到桌面工具的反向请求取消
+	 * ========================================================================
+	 * 数据源：受控宿主、延迟工具与取消通知。
+	 * 操作：1) 原始宿主身份不能被参数替换；2) 取消和重复编号不派发第二次动作。
+	 */
+	it("binds desktop tool calls to the sending host and discards cancelled late results", async () => {
+		logger.info("开始验证 MCP 反向调用取消");
+		const child = new ChildProcessFixture();
+		vi.mocked(utilityProcess.fork).mockReturnValue(child as unknown as UtilityProcess);
+		let finish: (value: { content: Array<{ type: "text"; text: string }> }) => void = () => {};
+		const callback = vi.fn(
+			async (_call: BuiltinCall, _owner: UtilityHostClient, _signal: AbortSignal) =>
+				new Promise<{ content: Array<{ type: "text"; text: string }> }>((resolve) => {
+					finish = resolve;
+				}),
+		);
+		const client = new UtilityHostClient(
+			"host.mjs",
+			"C:/project",
+			{ type: "recent" },
+			logger,
+			"C:/sdk",
+			"C:/state",
+			callback,
+		);
+		child.emit("message", { type: "ready" });
+		try {
+			// 6.1 反向工具仍是结构化请求，身份只取客户端对象。
+			const request = {
+				type: "builtinCall",
+				id: "desktop-call",
+				value: { server: "harness_browser", name: "browser_tabs", arguments: {} },
+			};
+			child.emit("message", request);
+			child.emit("message", request);
+			expect(callback).toHaveBeenCalledTimes(1);
+			expect(callback.mock.calls[0][1]).toBe(client);
+			const signal = callback.mock.calls[0][2];
+			expect(signal.aborted).toBe(false);
+			child.emit("message", { type: "builtinCancel", id: request.id });
+			expect(signal.aborted).toBe(true);
+			finish({ content: [{ type: "text", text: "late" }] });
+			await vi.waitFor(() =>
+				expect(callback.mock.results[0].value).resolves.toMatchObject({ content: [{ text: "late" }] }),
+			);
+			expect(child.postMessage.mock.calls.some(([item]) => item.type === "builtinResult")).toBe(false);
+		} finally {
+			await client.close();
+			logger.info("MCP 反向调用取消验证结束");
+		}
+	});
 	/*
 	 * ========================================================================
 	 * 步骤5：验证历史重命名携带可信工作区

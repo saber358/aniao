@@ -1,6 +1,13 @@
 import { z } from "zod";
 
-export const mcpTransportSchema = z.enum(["stdio", "http"]);
+export const mcpTransportSchema = z.enum(["stdio", "http", "builtin"]);
+export const mcpConnectionSchema = z.object({
+	name: z.string().max(64),
+	state: z.enum(["connecting", "connected", "disconnected", "failed"]),
+	toolCount: z.number().int().min(0).max(20000),
+	error: z.string().max(2000).optional(),
+});
+export type McpConnection = z.infer<typeof mcpConnectionSchema>;
 export const mcpServerNameSchema = z
 	.string()
 	.trim()
@@ -15,12 +22,15 @@ export const mcpServerSummarySchema = z.object({
 	args: z.array(z.string().max(2048)).max(100).optional(),
 	url: z.string().max(8192).optional(),
 	enabled: z.boolean(),
+	title: z.string().max(100).optional(),
+	description: z.string().max(1000).optional(),
+	connection: mcpConnectionSchema.optional(),
 });
 
 export const mcpServerInputSchema = z
 	.object({
 		name: mcpServerNameSchema,
-		type: mcpTransportSchema,
+		type: z.enum(["stdio", "http"]),
 		command: z.string().trim().max(4096).optional(),
 		args: z.array(z.string().max(2048)).max(100).optional(),
 		url: z.string().trim().max(8192).optional(),
@@ -38,4 +48,5 @@ export interface McpPort {
 	saveMcpServer(request: McpServerInput): Promise<McpServerSummary[]>;
 	removeMcpServer(name: string): Promise<McpServerSummary[]>;
 	setMcpServerEnabled(name: string, enabled: boolean): Promise<McpServerSummary[]>;
+	reconnectMcpServers(): Promise<McpServerSummary[]>;
 }

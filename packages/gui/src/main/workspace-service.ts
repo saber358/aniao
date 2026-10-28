@@ -5,6 +5,7 @@ import type { ArchivePolicy, ArchiveSelection, ArchiveSnapshot } from "../shared
 import type { GoalReadRequest, GoalSnapshot } from "../shared/goals.ts";
 import type { ImageImport, ImageRead } from "../shared/images.ts";
 import type { Logger } from "../shared/logger.ts";
+import type { McpConnection } from "../shared/mcp.ts";
 import type { PluginPackage, PluginScope } from "../shared/plugins.ts";
 import type {
 	ProjectFileMatches,
@@ -48,6 +49,7 @@ export interface ManagedHost extends AgentPort {
 	readSubagentTranscript?(runId: string, childId?: string): Promise<string | null>;
 	inspectSubagent?(runId: string, childId?: string): Promise<SubagentInspection>;
 	readGoals?(request: GoalReadRequest): Promise<GoalSnapshot>;
+	getMcpStatus?(): Promise<McpConnection[]>;
 	close(): Promise<void>;
 }
 
@@ -60,6 +62,8 @@ interface HostedSession {
 	dialogs: boolean;
 	failed: boolean;
 	release: () => void;
+	resourcesRevision: number;
+	reloading?: Promise<void>;
 }
 
 /*
@@ -81,6 +85,7 @@ export class WorkspaceService {
 	private readonly hosts = new Map<ManagedHost, HostedSession>();
 	private readonly recentHosts = new Map<string, ManagedHost>();
 	private changing = false;
+	private resourcesRevision = 0;
 	private get pendingCommands(): number {
 		return this.host ? (this.hosts.get(this.host)?.pending ?? 0) : 0;
 	}
@@ -212,6 +217,7 @@ export class WorkspaceService {
 			}
 			// 8.1 只缓存导航所需状态；完整消息由各会话自己的 SDK 和 Controller 持有。
 			const tracked: HostedSession = {
+				resourcesRevision: this.resourcesRevision,
 				host,
 				pending: 0,
 				dialogs: snapshot.dialogs.length > 0,
@@ -354,6 +360,7 @@ export class WorkspaceService {
 			if (this.closed) throw new Error("桌面工作区已关闭");
 			return await operation(async () => {
 				// 7.2 复用长命令通道；主进程互斥在配置落盘前已经建立。
+				this.resourcesRevision++;
 				if (!host || !snapshot) return;
 				if (this.closed || host.isClosed || this.host !== host) throw new Error("会话已更换，请重新打开项目");
 				await host.dispatch({
@@ -362,11 +369,67 @@ export class WorkspaceService {
 					generation: snapshot.generation,
 					command: { type: "reloadResources" },
 				});
+				const active = this.hosts.get(host);
+				if (active) active.resourcesRevision = this.resourcesRevision;
 			});
 		} finally {
 			this.changing = false;
 			this.logger.info("工作区资源配置修改结束");
+			await Promise.allSettled([...this.hosts.values()].map((entry) => this.refreshHostResources(entry)));
 		}
+	}
+
+	/*
+	 * ========================================================================
+	 * 步骤11：让已打开的其他会话同步全局 MCP 配置
+	 * ========================================================================
+	 * 数据源：全局资源修订、每个宿主的空闲事实与配置快照。
+	 * 操作：1) 空闲会话即时重载；2) 忙碌会话收束后重载，下一任务前强制核对。
+	 */
+	private async refreshHostResources(entry: HostedSession): Promise<void> {
+		if (entry.reloading) return entry.reloading;
+		if (
+			this.closed ||
+			this.changing ||
+			entry.host.isClosed ||
+			entry.resourcesRevision === this.resourcesRevision ||
+			entry.pending
+		)
+			return;
+		const revision = this.resourcesRevision;
+		entry.reloading = (async () => {
+			this.logger.info("开始同步会话 MCP 配置");
+			try {
+				const state = await entry.host.getSnapshot();
+				if (
+					state.run.phase !== "idle" ||
+					state.dialogs.length ||
+					state.authentication.flow ||
+					(state.plan && !["off", "completed"].includes(state.plan.phase))
+				)
+					return;
+				await entry.host.dispatch({
+					requestId: randomUUID(),
+					sessionId: state.sessionId,
+					generation: state.generation,
+					command: { type: "reloadResources" },
+				});
+				entry.resourcesRevision = revision;
+			} finally {
+				this.logger.info("会话 MCP 配置同步结束");
+			}
+		})();
+		try {
+			await entry.reloading;
+		} finally {
+			entry.reloading = undefined;
+		}
+	}
+	async getMcpStatus(): Promise<McpConnection[]> {
+		const host = this.host;
+		if (!host?.getMcpStatus || host.isClosed) return [];
+		const status = await host.getMcpStatus();
+		return this.host === host && !host.isClosed ? status : [];
 	}
 
 	async listPlugins(): Promise<PluginPackage[]> {
@@ -437,6 +500,11 @@ export class WorkspaceService {
 			(this.changing && !["reply", "cancelLogin", "abort", "dismissNotice"].includes(envelope.command.type))
 		)
 			throw new Error("请先连接项目");
+		if (["prompt", "approvePlan"].includes(envelope.command.type)) {
+			await this.refreshHostResources(entry);
+			if (entry.resourcesRevision !== this.resourcesRevision)
+				throw new Error("MCP 配置更新待生效，请先处理当前交互或计划");
+		}
 		entry.pending++;
 		try {
 			// 8.3 命令从提交到完成始终绑定原宿主，切换页面不改变其归属。
@@ -448,6 +516,8 @@ export class WorkspaceService {
 				running: !entry.host.isClosed && entry.runtime.connected && isTaskRunning(entry.phase),
 			};
 			if (!this.closed) this.publishRuntimes();
+			if (!this.closed)
+				void this.refreshHostResources(entry).catch(() => this.logger.info("会话 MCP 更新失败，下次任务前重试"));
 		}
 	}
 

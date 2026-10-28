@@ -7,6 +7,7 @@ import {
 	browserNavigateSchema,
 	browserStateSchema,
 } from "../shared/browser.ts";
+import { browserPresentationSchema } from "../shared/builtin-mcp.ts";
 import {
 	archivePolicySchema,
 	archiveSelectionSchema,
@@ -197,6 +198,14 @@ const bridge: DesktopBridge = {
 		ipcRenderer.on(IPC_CHANNELS.browserEvent, receive);
 		return () => ipcRenderer.removeListener(IPC_CHANNELS.browserEvent, receive);
 	},
+	subscribeBrowserPresentation: (listener) => {
+		const receive = (_event: Electron.IpcRendererEvent, input: unknown) => {
+			const parsed = browserPresentationSchema.safeParse(input);
+			if (parsed.success) listener(parsed.data);
+		};
+		ipcRenderer.on(IPC_CHANNELS.browserPresentation, receive);
+		return () => ipcRenderer.removeListener(IPC_CHANNELS.browserPresentation, receive);
+	},
 	getUpdateState: async () => updateStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.updateState)),
 	checkForUpdates: async () => updateStateSchema.parse(await ipcRenderer.invoke(IPC_CHANNELS.updateCheck)),
 	// 1.4 下载通过独立受限通道发起，返回状态仍需校验。
@@ -219,6 +228,11 @@ const bridge: DesktopBridge = {
 			.array()
 			.max(200)
 			.parse(await ipcRenderer.invoke(IPC_CHANNELS.mcpList)),
+	reconnectMcpServers: async () =>
+		mcpServerSummarySchema
+			.array()
+			.max(200)
+			.parse(await ipcRenderer.invoke(IPC_CHANNELS.mcpReconnect)),
 	saveMcpServer: async (request) =>
 		mcpServerSummarySchema
 			.array()

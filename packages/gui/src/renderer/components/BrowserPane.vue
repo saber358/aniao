@@ -9,10 +9,16 @@ import {
 import { createLogger } from "../../shared/logger.ts";
 import { UButton, UIcon } from "../ui.ts";
 
-const props = defineProps<{ active: boolean; cwd?: string; initialUrl?: string; initialFile?: string }>();
+const props = defineProps<{
+	active: boolean;
+	cwd?: string;
+	initialUrl?: string;
+	initialFile?: string;
+	browserId?: string;
+}>();
 const bridge = window.piDesktop;
 const logger = createLogger("browser-pane");
-const id = crypto.randomUUID();
+const id = props.browserId ?? crypto.randomUUID();
 const address = ref("");
 const addressFocused = ref(false);
 const addressDirty = ref(false);

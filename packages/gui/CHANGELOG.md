@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added four free, keyless built-in MCP servers for the visible side browser, public web reading/search, documentation search/read and read-only public GitHub access, with native-page snapshots, form actions, screenshots and per-session tabs. See [built-in MCP](docs/builtin-mcp.md).
+
 - Added settings usage statistics from real local SDK history, with token totals, session peak, chat duration, activity streaks, a yearly heatmap, selectable daily trends and model breakdowns; scans run in an isolated read-only process without model calls.
 
 - Added archive management with search, sorting, project groups, restoration, confirmation before deletion to the system trash, and persisted automatic archiving that skips pinned or running sessions and respects manual restoration.
@@ -111,6 +113,8 @@
 - Application updates now require an explicit download click from the sidebar, General Settings, or Help; automatic checks only fetch metadata, and all three entry points share progress and retry state.
 
 ### Fixed
+
+- Synchronize global MCP changes across retained idle hosts and refresh deferred updates before the next task; show actual connection state, tool count and retryable errors, preserve spaced arguments with one-per-line input, and cancel pending desktop tool requests on abort or shutdown.
 
 - Fix reversed sidebar resizing and lost widths after reopening by retaining panel registration and order, keep pixel width stable across window changes, and clamp the right panel to preserve conversation space while native pages yield during left-sidebar drags.
 

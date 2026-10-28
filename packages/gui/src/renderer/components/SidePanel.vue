@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { SubagentSnapshot } from "../../shared/subagents.ts";
 import { PROJECT_IMAGE_PATTERN } from "../../shared/project-browser.ts";
 import { UButton, UIcon } from "../ui.ts";
@@ -21,16 +21,33 @@ interface SideTab {
 	file?: string;
 	runId?: string;
 	childId?: string;
+	browserId?: string;
 }
 
 const MIN_WIDTH = 360;
 const MAX_WIDTH = 900;
 const WIDTH_KEY = "pi-gui-side-panel-width";
-const props = defineProps<{ cwd: string; subagents?: SubagentSnapshot | null }>();
+const props = defineProps<{ cwd: string; sessionKey: string; active: boolean; subagents?: SubagentSnapshot | null }>();
 const emit = defineEmits<{ close: []; review: [text: string]; "open-worktree": [cwd: string] }>();
 const logger = createLogger("side-panel");
 const tabs = ref<SideTab[]>([{ id: "1", type: "start" }]);
 const activeId = ref<string | null>("1");
+const groups = ref([{ key: props.sessionKey, cwd: props.cwd, tabs: tabs.value, activeId: "1" as string | null }]);
+watch(
+	() => props.sessionKey,
+	(current, previous) => {
+		const old = groups.value.find((group) => group.key === previous);
+		if (old) old.activeId = activeId.value;
+		let group = groups.value.find((group) => group.key === current);
+		if (!group) {
+			group = { key: current, cwd: props.cwd, tabs: [{ id: String(nextId++), type: "start" }], activeId: null };
+			group.activeId = group.tabs[0].id;
+			groups.value.push(group);
+		}
+		tabs.value = group.tabs;
+		activeId.value = group.activeId;
+	},
+);
 const maximized = ref(false);
 const panelRef = ref<HTMLElement | null>(null);
 const maxWidth = ref(MAX_WIDTH);
@@ -204,7 +221,7 @@ function openTool(type: SideTool): void {
 			openStart();
 			return;
 		}
-		const tab = { id: String(nextId++), type };
+		const tab = { id: String(nextId++), type, ...(type === "browser" ? { browserId: crypto.randomUUID() } : {}) };
 		tabs.value.push(tab);
 		activeId.value = tab.id;
 	} finally {
@@ -241,9 +258,36 @@ function openFile(path: string): void {
 }
 
 function openUrl(url: string): void {
-	const tab: SideTab = { id: String(nextId++), type: "browser", url };
+	const tab: SideTab = { id: String(nextId++), type: "browser", url, browserId: crypto.randomUUID() };
 	tabs.value.push(tab);
 	activeId.value = tab.id;
+}
+
+/*
+ * ========================================================================
+ * 步骤4：展示模型绑定的真实浏览器标签
+ * ========================================================================
+ * 数据源：主进程核对后的标签 UUID，不由网页请求创建工作台工具。
+ * 操作：1) 复用已有网页身份；2) 模型关闭时同步移除对应标签。
+ */
+function openAgentBrowser(id: string, closed = false): void {
+	logger.info("开始同步模型浏览器标签");
+	try {
+		const existing = tabs.value.find((tab) => tab.browserId === id);
+		if (closed) {
+			if (existing) closeTab(existing.id);
+			return;
+		}
+		if (existing) {
+			activeId.value = existing.id;
+			return;
+		}
+		const tab: SideTab = { id: String(nextId++), type: "browser", browserId: id };
+		tabs.value.push(tab);
+		activeId.value = tab.id;
+	} finally {
+		logger.info("模型浏览器标签同步结束");
+	}
 }
 
 function openHtmlFile(path: string): void {
@@ -252,7 +296,7 @@ function openHtmlFile(path: string): void {
 		activeId.value = existing.id;
 		return;
 	}
-	const tab: SideTab = { id: String(nextId++), type: "browser", file: path };
+	const tab: SideTab = { id: String(nextId++), type: "browser", file: path, browserId: crypto.randomUUID() };
 	tabs.value.push(tab);
 	activeId.value = tab.id;
 }
@@ -270,7 +314,7 @@ function closeTab(id: string): void {
 	if (activeId.value === id) activeId.value = tabs.value[Math.max(0, index - 1)]?.id ?? tabs.value[0].id;
 }
 
-defineExpose({ openTool, openFile, openUrl, openHtmlFile, openStart, openSubagent });
+defineExpose({ openTool, openFile, openUrl, openHtmlFile, openStart, openSubagent, openAgentBrowser });
 </script>
 
 <template>
@@ -329,50 +373,53 @@ defineExpose({ openTool, openFile, openUrl, openHtmlFile, openStart, openSubagen
 		</header>
 
 		<div class="side-body">
-			<template v-for="tab in tabs" :key="tab.id">
-				<div v-show="tab.id === activeId" class="side-view">
-					<div v-if="tab.type === 'start'" class="side-start">
-						<div class="side-start-mark" aria-hidden="true">
-							<UIcon name="i-lucide-compass" />
+			<template v-for="group in groups" :key="group.key">
+				<template v-for="tab in group.tabs" :key="tab.id">
+					<div v-show="group.key === props.sessionKey && tab.id === activeId" class="side-view">
+						<div v-if="tab.type === 'start'" class="side-start">
+							<div class="side-start-mark" aria-hidden="true">
+								<UIcon name="i-lucide-compass" />
+							</div>
+							<button
+								v-for="tool in tools"
+								:key="tool.type"
+								type="button"
+								class="side-tool"
+								@click="openTool(tool.type)"
+							>
+								<span class="side-tool-icon"><UIcon :name="tool.icon" aria-hidden="true" /></span>
+								<span class="side-tool-copy">
+									<strong>{{ tool.title }}</strong>
+									<small>{{ tool.note }}</small>
+								</span>
+								<kbd v-if="tool.shortcut">{{ tool.shortcut }}</kbd>
+							</button>
 						</div>
-						<button
-							v-for="tool in tools"
-							:key="tool.type"
-							type="button"
-							class="side-tool"
-							@click="openTool(tool.type)"
-						>
-							<span class="side-tool-icon"><UIcon :name="tool.icon" aria-hidden="true" /></span>
-							<span class="side-tool-copy">
-								<strong>{{ tool.title }}</strong>
-								<small>{{ tool.note }}</small>
-							</span>
-							<kbd v-if="tool.shortcut">{{ tool.shortcut }}</kbd>
-						</button>
+						<EngineeringPanel
+							v-else-if="tab.type === 'changes'"
+							:cwd="group.cwd"
+							@review="emit('review', $event)"
+							@open-worktree="emit('open-worktree', $event)"
+						/>
+						<TerminalPanel v-else-if="tab.type === 'terminal'" :cwd="group.cwd" :with-header="false" />
+						<WorkspaceFiles v-else-if="tab.type === 'files'" :cwd="group.cwd" @open="openFile" />
+						<FilePreview v-else-if="tab.type === 'file' && tab.path" :cwd="group.cwd" :path="tab.path" />
+						<SubagentDetail
+							v-else-if="tab.type === 'subagent'"
+							:snapshot="props.subagents ?? null"
+							:run-id="tab.runId ?? ''"
+							:child-id="tab.childId"
+						/>
+						<BrowserPane
+							v-else
+							:active="props.active && group.key === props.sessionKey && tab.id === activeId"
+							:cwd="group.cwd"
+							:initial-url="tab.url"
+							:initial-file="tab.file"
+							:browser-id="tab.browserId"
+						/>
 					</div>
-					<EngineeringPanel
-						v-else-if="tab.type === 'changes'"
-						:cwd="props.cwd"
-						@review="emit('review', $event)"
-						@open-worktree="emit('open-worktree', $event)"
-					/>
-					<TerminalPanel v-else-if="tab.type === 'terminal'" :cwd="props.cwd" :with-header="false" />
-					<WorkspaceFiles v-else-if="tab.type === 'files'" :cwd="props.cwd" @open="openFile" />
-					<FilePreview v-else-if="tab.type === 'file' && tab.path" :cwd="props.cwd" :path="tab.path" />
-					<SubagentDetail
-						v-else-if="tab.type === 'subagent'"
-						:snapshot="props.subagents ?? null"
-						:run-id="tab.runId ?? ''"
-						:child-id="tab.childId"
-					/>
-					<BrowserPane
-						v-else
-						:active="tab.id === activeId"
-						:cwd="props.cwd"
-						:initial-url="tab.url"
-						:initial-file="tab.file"
-					/>
-				</div>
+				</template>
 			</template>
 		</div>
 	</aside>

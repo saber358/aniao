@@ -3,6 +3,7 @@ import { type HostResponse, hostRequestSchema } from "../shared/protocol.ts";
 import { sessionTargetSchema } from "../shared/workspace.ts";
 import { ImageStore } from "../storage/image-store.ts";
 import { AgentHost } from "./agent-host.ts";
+import { HostBuiltinMcp } from "./builtin-mcp.ts";
 import { PlanJournal } from "./plan-journal.ts";
 import { HostPluginService } from "./plugin-service.ts";
 import { QueueJournal } from "./queue-journal.ts";
@@ -31,7 +32,12 @@ async function startHost(): Promise<void> {
 	if (!cwd || !queueDirectory) throw new Error("缺少项目或桌面存储目录");
 
 	// 1.1 临时运行时完整建立后才向主进程报告可用。
-	const { runtime, forkDraft, credentials } = await openRuntime(cwd, target, logger);
+	const builtin = new HostBuiltinMcp(
+		logger,
+		(id, value) => parentPort.postMessage({ type: "builtinCall", id, value }),
+		(id) => parentPort.postMessage({ type: "builtinCancel", id }),
+	);
+	const { runtime, forkDraft, credentials } = await openRuntime(cwd, target, logger, builtin);
 	const journal = new QueueJournal(queueDirectory, cwd, runtime.session.sessionId, logger);
 	await journal.load();
 	const plans = new PlanJournal(queueDirectory, cwd, runtime.session.sessionId, logger);
@@ -50,7 +56,9 @@ async function startHost(): Promise<void> {
 		}
 		const request = parsed.data;
 		try {
-			if (request.type === "snapshot") post({ type: "snapshot", id: request.id, value: host.snapshot });
+			if (request.type === "builtinResult") builtin.receive(request.id, request.value);
+			else if (request.type === "mcpStatus") post({ type: "mcpStatus", id: request.id, value: builtin.status() });
+			else if (request.type === "snapshot") post({ type: "snapshot", id: request.id, value: host.snapshot });
 			else if (request.type === "transition") {
 				await host.beforeTransition(request.target);
 				post({ type: "result", id: request.id });
@@ -113,6 +121,7 @@ async function startHost(): Promise<void> {
 					),
 				});
 			} else {
+				builtin.close();
 				await host.dispose();
 				post({ type: "result", id: request.id });
 				process.exit(0);

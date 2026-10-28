@@ -11,6 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { Logger } from "../shared/logger.ts";
 import type { SessionTarget } from "../shared/workspace.ts";
+import type { HostBuiltinMcp } from "./builtin-mcp.ts";
 import { AuthStorage } from "./kernel.ts";
 import { forkSessionManager } from "./session-fork.ts";
 import { openSessionManager } from "./session-library.ts";
@@ -24,7 +25,7 @@ import { openSessionManager } from "./session-library.ts";
  *   1) cwd 资源由 SDK 服务工厂创建，扩展绑定等传输准备完成
  *   2) 分支只替换临时运行时，失败关闭资源，原活动宿主继续保留
  */
-export async function openRuntime(cwd: string, target: SessionTarget, logger: Logger) {
+export async function openRuntime(cwd: string, target: SessionTarget, logger: Logger, builtin?: HostBuiltinMcp) {
 	logger.info("开始创建待接替运行时");
 	try {
 		// 1.1 新建、恢复和分支复用同一工厂，避免另建 SDK 组装流程。
@@ -42,7 +43,12 @@ export async function openRuntime(cwd: string, target: SessionTarget, logger: Lo
 					}),
 					resourceLoaderOptions: {
 						// SDK 会话不会自动加载 CLI 内置扩展；显式启用 MCP、codemode 和工具搜索。
-						extensionFactories: [createCodemodeExtension(), createToolSearchExtension(), createMcpExtension()],
+						extensionFactories: [
+							createCodemodeExtension(),
+							createToolSearchExtension(),
+							...(builtin ? [builtin.register(options.agentDir)] : []),
+							createMcpExtension(builtin ? { createTransport: builtin.createTransport } : undefined),
+						],
 					},
 				});
 				const result = await createAgentSessionFromServices({

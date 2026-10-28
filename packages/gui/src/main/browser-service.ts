@@ -77,6 +77,8 @@ export class BrowserService {
 				error: null,
 				notice: null,
 			};
+			// 1.6 后台新标签也需要有效视口；显示后由真实右栏布局覆盖。
+			view.setBounds({ x: 0, y: 0, width: 1024, height: 768 });
 			view.setVisible(false);
 			this.window.contentView.addChildView(view);
 			this.connect(view);
@@ -185,6 +187,12 @@ export class BrowserService {
 	private owned(id: string): WebContentsView {
 		if (this.state?.id !== id || !this.view || this.view.webContents.isDestroyed()) throw new Error("浏览器标签已关闭");
 		return this.view;
+	}
+	getState(): BrowserState | undefined {
+		return this.state ? { ...this.state } : undefined;
+	}
+	getContents(id: string): Electron.WebContents {
+		return this.owned(id).webContents;
 	}
 
 	private connect(view: WebContentsView): void {
@@ -319,7 +327,12 @@ export class BrowserService {
 	}
 
 	private readonly onWorkbenchReload = (): void => this.closeCurrent();
-	private readonly onDownload = (event: Event): void => {
+	private readonly onDownload = (
+		event: Event,
+		_item?: Electron.DownloadItem,
+		contents?: Electron.WebContents,
+	): void => {
+		if (contents && contents !== this.view?.webContents) return;
 		// 1.4 下载交给系统浏览器，内置网页不能静默写入本机文件。
 		event.preventDefault();
 		this.ready = Boolean(this.committedUrl);

@@ -21,6 +21,7 @@ import {
 	browserNavigateFileSchema,
 	browserNavigateSchema,
 } from "../shared/browser.ts";
+import { BUILTIN_MCP_SERVERS, type BuiltinCall, builtinCallSchema, builtinToolSchemas } from "../shared/builtin-mcp.ts";
 import { archivePolicySchema, archiveSelectionSchema } from "../shared/data-statistics.ts";
 import { editActionSchema } from "../shared/edit.ts";
 import { gitDiffRequestSchema, gitMutationRequestSchema, gitStatusRequestSchema } from "../shared/git.ts";
@@ -58,9 +59,10 @@ import {
 	workspacePathSchema,
 	workspaceRenameSchema,
 } from "../shared/workspace.ts";
-import { BrowserService } from "./browser-service.ts";
+import { BrowserManager } from "./browser-manager.ts";
 import { resolveAgentDirectory, seedDefaultProvider } from "./default-provider.ts";
 import { previewProjectFile } from "./file-preview.ts";
+import { FreeWebTools } from "./free-web-tools.ts";
 import { GitService } from "./git-service.ts";
 import { McpService } from "./mcp-service.ts";
 import { ParallelScheduler } from "./parallel-scheduler.ts";
@@ -153,6 +155,23 @@ export async function startApplication(): Promise<void> {
 	}
 	if (quitting) return;
 	const store = new WorkspaceStore(join(app.getPath("userData"), "workspace"), logger);
+	const mcp = new McpService(logger);
+	const freeWeb = new FreeWebTools(logger);
+	let browser: BrowserManager | undefined;
+	const executeBuiltin = async (input: BuiltinCall, owner: UtilityHostClient, signal: AbortSignal) => {
+		const call = builtinCallSchema.parse(input);
+		const server = BUILTIN_MCP_SERVERS.find((item) => item.name === call.server);
+		if (!server?.tools.some((name) => name === call.name)) throw new Error("内置 MCP 工具不属于该服务");
+		builtinToolSchemas[call.name].parse(call.arguments);
+		if (!(await mcp.list()).some((item) => item.name === call.server && item.enabled))
+			throw new Error("此内置 MCP 已停用");
+		signal.throwIfAborted();
+		if (owner.isClosed) throw new Error("会话已关闭");
+		if (call.server !== "harness_browser") return freeWeb.execute(call, signal);
+		if (!browser) throw new Error("右栏浏览器尚未就绪");
+		const identity = await owner.getSnapshot();
+		return browser.execute({ sessionId: identity.sessionId, generation: identity.generation }, call, signal);
+	};
 	const workspace = new WorkspaceService(
 		store,
 		(cwd, target) =>
@@ -163,6 +182,7 @@ export async function startApplication(): Promise<void> {
 				logger,
 				sdkDirectory,
 				join(app.getPath("userData"), "workspace"),
+				executeBuiltin,
 			),
 		logger,
 	);
@@ -179,7 +199,6 @@ export async function startApplication(): Promise<void> {
 	cleanup.push(() => pty.disposeAll());
 	const worktrees = new WorktreeService();
 	const projectBrowser = new ProjectBrowser();
-	const mcp = new McpService(logger);
 	const parallel = new ParallelScheduler(
 		join(app.getPath("userData"), "parallel", "jobs.json"),
 		(cwd) =>
@@ -190,6 +209,7 @@ export async function startApplication(): Promise<void> {
 				logger,
 				sdkDirectory,
 				join(app.getPath("userData"), "workspace"),
+				executeBuiltin,
 			),
 		async (job) => {
 			/*
@@ -246,10 +266,18 @@ export async function startApplication(): Promise<void> {
 		event.preventDefault();
 	});
 	window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-	const browser = new BrowserService(window, logger, (state) => {
-		if (!window.isDestroyed()) window.webContents.send(IPC_CHANNELS.browserEvent, state);
-	});
-	cleanup.push(() => browser.dispose());
+	browser = new BrowserManager(
+		window,
+		logger,
+		(state) => {
+			if (!window.isDestroyed()) window.webContents.send(IPC_CHANNELS.browserEvent, state);
+		},
+		(value) => {
+			if (!window.isDestroyed()) window.webContents.send(IPC_CHANNELS.browserPresentation, value);
+		},
+	);
+	const browsers = browser;
+	cleanup.push(() => browsers.dispose());
 	workspace.subscribe((notification) => {
 		if (!window.isDestroyed()) window.webContents.send(IPC_CHANNELS.notification, notification);
 	});
@@ -274,13 +302,15 @@ export async function startApplication(): Promise<void> {
 		if (verifyWindowSender(event)) window.close();
 	});
 	// 6.1 仅工作台主框架能创建、导航和放置网页，外部网页无法伪造调用。
-	ipcMain.handle(IPC_CHANNELS.browserCreate, (event, input: unknown) => {
+	ipcMain.handle(IPC_CHANNELS.browserCreate, async (event, input: unknown) => {
 		verifySender(event);
-		return browser.create(browserIdSchema.parse(input));
+		const owner = await workspace.getSnapshot();
+		if (!owner) throw new Error("请先连接项目");
+		return browsers.create(browserIdSchema.parse(input), { sessionId: owner.sessionId, generation: owner.generation });
 	});
 	ipcMain.handle(IPC_CHANNELS.browserNavigate, (event, input: unknown) => {
 		verifySender(event);
-		browser.navigate(browserNavigateSchema.parse(input));
+		browsers.navigate(browserNavigateSchema.parse(input));
 	});
 	ipcMain.handle(IPC_CHANNELS.browserNavigateFile, async (event, input: unknown) => {
 		verifySender(event);
@@ -288,21 +318,21 @@ export async function startApplication(): Promise<void> {
 		const current = await workspace.getSnapshot();
 		if (!current || current.cwd !== request.cwd) throw new Error("只能打开当前工作区的文件");
 		const file = await projectBrowser.resolveFile({ cwd: request.cwd, path: request.path });
-		browser.navigateFile({ id: request.id, url: pathToFileURL(file.target).href });
+		browsers.navigateFile({ id: request.id, url: pathToFileURL(file.target).href });
 	});
 	ipcMain.handle(IPC_CHANNELS.browserAction, (event, input: unknown) => {
 		verifySender(event);
-		browser.action(browserActionSchema.parse(input));
+		browsers.action(browserActionSchema.parse(input));
 	});
 	ipcMain.on(IPC_CHANNELS.browserLayout, (event, input: unknown) => {
 		if (!verifyWindowSender(event)) return;
 		const layout = browserLayoutSchema.safeParse(input);
-		if (layout.success) browser.setLayout(layout.data);
+		if (layout.success) browsers.setLayout(layout.data);
 	});
 	ipcMain.on(IPC_CHANNELS.browserClose, (event, input: unknown) => {
 		if (!verifyWindowSender(event)) return;
 		const id = browserIdSchema.safeParse(input);
-		if (id.success) browser.close(id.data);
+		if (id.success) browsers.close(id.data);
 	});
 	/*
 	 * ========================================================================
@@ -699,9 +729,21 @@ export async function startApplication(): Promise<void> {
 		const request = goalReadRequestSchema.parse(input);
 		return workspace.readGoals(request);
 	});
+	const mcpList = async () => {
+		const [servers, connections] = await Promise.all([mcp.list(), workspace.getMcpStatus()]);
+		return servers.map((server) => ({
+			...server,
+			connection: server.enabled ? connections.find((item) => item.name === server.name) : undefined,
+		}));
+	};
+	ipcMain.handle(IPC_CHANNELS.mcpReconnect, async (event) => {
+		verifySender(event);
+		await workspace.changeResources((reload) => reload());
+		return mcpList();
+	});
 	ipcMain.handle(IPC_CHANNELS.mcpList, async (event) => {
 		verifySender(event);
-		return mcp.list();
+		return mcpList();
 	});
 	ipcMain.handle(IPC_CHANNELS.mcpSave, async (event, input: unknown) => {
 		verifySender(event);

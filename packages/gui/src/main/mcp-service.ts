@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { BUILTIN_MCP_SERVERS } from "../shared/builtin-mcp.ts";
 import type { Logger } from "../shared/logger.ts";
 import {
 	type McpServerInput,
@@ -35,7 +36,14 @@ export class McpService {
 
 	private summaries(document: McpDocument): McpServerSummary[] {
 		const servers = isRecord(document.mcpServers) ? document.mcpServers : {};
-		const result: McpServerSummary[] = [];
+		const flags = isRecord(document.harnessBuiltins) ? document.harnessBuiltins : {};
+		const result: McpServerSummary[] = BUILTIN_MCP_SERVERS.map((server) => ({
+			name: server.name,
+			type: "builtin",
+			title: server.title,
+			description: server.description,
+			enabled: flags[server.name] !== false,
+		}));
 		for (const [name, value] of Object.entries(servers)) {
 			if (!isRecord(value)) continue;
 			const command = typeof value.command === "string" ? value.command : undefined;
@@ -60,6 +68,7 @@ export class McpService {
 
 	async save(input: McpServerInput, apply?: () => Promise<void>): Promise<McpServerSummary[]> {
 		const parsed = mcpServerInputSchema.parse(input);
+		if (BUILTIN_MCP_SERVERS.some((server) => server.name === parsed.name)) throw new Error("该名称由内置 MCP 使用");
 		return this.change(async (document) => {
 			const servers = isRecord(document.mcpServers) ? { ...document.mcpServers } : {};
 			const current = servers[parsed.name];
@@ -88,6 +97,7 @@ export class McpService {
 
 	async remove(name: string, apply?: () => Promise<void>): Promise<McpServerSummary[]> {
 		const parsed = mcpServerNameSchema.parse(name);
+		if (BUILTIN_MCP_SERVERS.some((server) => server.name === parsed)) throw new Error("内置 MCP 可以停用，不能删除");
 		return this.change(async (document) => {
 			const servers = isRecord(document.mcpServers) ? { ...document.mcpServers } : {};
 			delete servers[parsed];
@@ -98,6 +108,13 @@ export class McpService {
 	async setEnabled(name: string, enabled: boolean, apply?: () => Promise<void>): Promise<McpServerSummary[]> {
 		const parsed = mcpServerNameSchema.parse(name);
 		return this.change(async (document) => {
+			if (BUILTIN_MCP_SERVERS.some((server) => server.name === parsed)) {
+				document.harnessBuiltins = {
+					...(isRecord(document.harnessBuiltins) ? document.harnessBuiltins : {}),
+					[parsed]: enabled,
+				};
+				return;
+			}
 			const servers = isRecord(document.mcpServers) ? { ...document.mcpServers } : {};
 			const current = servers[parsed];
 			if (!isRecord(current)) throw new Error("MCP 服务不存在");

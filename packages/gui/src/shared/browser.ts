@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { BrowserPresentation } from "./builtin-mcp.ts";
 
 // 1.1 网页只接受网络地址，浏览器会话编号不能复用工作台身份。
 export const browserIdSchema = z.string().uuid();
@@ -50,6 +51,7 @@ export interface BrowserPort {
 	browserLayout(request: BrowserLayout): void;
 	browserClose(id: string): void;
 	subscribeBrowser(listener: (state: BrowserState) => void): () => void;
+	subscribeBrowserPresentation(listener: (value: BrowserPresentation) => void): () => void;
 }
 
 /*

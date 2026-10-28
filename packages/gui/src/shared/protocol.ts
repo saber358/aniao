@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { BrowserPort } from "./browser.ts";
+import { builtinCallSchema, builtinResultSchema } from "./builtin-mcp.ts";
 import { CLIPBOARD_TEXT_LIMIT, type ClipboardPort } from "./clipboard.ts";
 import type { DataStatisticsPort } from "./data-statistics.ts";
 import type { EditAction } from "./edit.ts";
@@ -17,6 +18,7 @@ import type { ImagesPort } from "./images.ts";
 import { DRAFT_TEXT_LIMIT } from "./input-limits.ts";
 import { authenticationSchema, dialogReplySchema, dialogRequestSchema, extensionStateSchema } from "./interactions.ts";
 import type { McpPort } from "./mcp.ts";
+import { mcpConnectionSchema } from "./mcp.ts";
 import type { ParallelCancel, ParallelJob, ParallelOpen, ParallelStart } from "./parallel.ts";
 import { planStateSchema } from "./plan.ts";
 import type { PluginPackage, PluginScope } from "./plugins.ts";
@@ -228,6 +230,8 @@ export const notificationSchema = z.discriminatedUnion("type", [
 
 // 1.3 宿主 RPC 与业务事件共用校验，但不混用请求编号与事件序号。
 export const hostRequestSchema = z.discriminatedUnion("type", [
+	z.object({ type: z.literal("builtinResult"), id: identifier, value: builtinResultSchema }),
+	z.object({ type: z.literal("mcpStatus"), id: identifier }),
 	goalReadRequestSchema.extend({ type: z.literal("goals"), id: identifier }),
 	subagentOutputRequestSchema.extend({ type: z.literal("subagentInspection"), id: identifier }),
 	z.object({ type: z.literal("transition"), id: identifier, target: sessionTargetSchema }),
@@ -264,6 +268,9 @@ export const hostRequestSchema = z.discriminatedUnion("type", [
 	z.object({ type: z.literal("shutdown"), id: identifier }),
 ]);
 export const hostResponseSchema = z.discriminatedUnion("type", [
+	z.object({ type: z.literal("builtinCancel"), id: identifier }),
+	z.object({ type: z.literal("builtinCall"), id: identifier, value: builtinCallSchema }),
+	z.object({ type: z.literal("mcpStatus"), id: identifier, value: z.array(mcpConnectionSchema).max(200) }),
 	z.object({ type: z.literal("goals"), id: identifier, value: goalSnapshotSchema }),
 	z.object({ type: z.literal("subagentInspection"), id: identifier, value: subagentInspectionSchema }),
 	z.object({ type: z.literal("image"), id: identifier, url: imageUrlSchema }),
@@ -406,6 +413,8 @@ export const IPC_CHANNELS = {
 	browserLayout: "pi-gui:browser-layout",
 	browserClose: "pi-gui:browser-close",
 	browserEvent: "pi-gui:browser-event",
+	browserPresentation: "pi-gui:browser-presentation",
+	mcpReconnect: "pi-gui:mcp-reconnect",
 	windowMinimize: "pi-gui:window-minimize",
 	windowToggleMaximize: "pi-gui:window-toggle-maximize",
 	windowClose: "pi-gui:window-close",

@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { type UtilityProcess, utilityProcess } from "electron";
+import { type BuiltinCall, type BuiltinResult, builtinResultSchema } from "../shared/builtin-mcp.ts";
 import type { GoalReadRequest, GoalSnapshot } from "../shared/goals.ts";
 import type { Logger } from "../shared/logger.ts";
+import type { McpConnection } from "../shared/mcp.ts";
 import type { PluginPackage, PluginScope } from "../shared/plugins.ts";
 import {
 	type CommandEnvelope,
@@ -40,6 +42,12 @@ export class UtilityHostClient {
 	private startupTimer?: ReturnType<typeof setTimeout>;
 	private closed = false;
 	private forkDraft?: string;
+	private readonly builtin?: (
+		call: BuiltinCall,
+		owner: UtilityHostClient,
+		signal: AbortSignal,
+	) => Promise<BuiltinResult>;
+	private readonly builtinPending = new Map<string, AbortController>();
 
 	constructor(
 		entry: string,
@@ -48,8 +56,10 @@ export class UtilityHostClient {
 		logger: Logger,
 		sdkDirectory: string,
 		queueDirectory: string,
+		builtin?: (call: BuiltinCall, owner: UtilityHostClient, signal: AbortSignal) => Promise<BuiltinResult>,
 	) {
 		this.logger = logger;
+		this.builtin = builtin;
 		logger.info("开始启动独立 Agent 进程");
 		this.ready = new Promise<void>((resolve, reject) => {
 			this.resolveReady = resolve;
@@ -162,6 +172,11 @@ export class UtilityHostClient {
 	get isClosed(): boolean {
 		return this.closed;
 	}
+	async getMcpStatus(): Promise<McpConnection[]> {
+		const response = await this.request({ type: "mcpStatus", id: randomUUID() });
+		if (response.type !== "mcpStatus") throw new Error("MCP 状态响应无效");
+		return response.value;
+	}
 
 	async dispatch(value: CommandEnvelope): Promise<void> {
 		await this.request({ type: "command", id: value.requestId, value });
@@ -182,6 +197,31 @@ export class UtilityHostClient {
 			return;
 		}
 		const response = parsed.data;
+		if (response.type === "builtinCancel") {
+			this.builtinPending.get(response.id)?.abort();
+			return;
+		}
+		if (response.type === "builtinCall") {
+			if (this.closed || this.builtinPending.has(response.id) || this.builtinPending.size >= 16) return;
+			const abort = new AbortController();
+			this.builtinPending.set(response.id, abort);
+			// 2.1 反向调用绑定发送请求的宿主，不采用 Renderer 的活动会话。
+			void (async () => {
+				let value: BuiltinResult;
+				try {
+					value = builtinResultSchema.parse(await this.builtin?.(response.value, this, abort.signal));
+				} catch (error) {
+					value = {
+						isError: true,
+						content: [{ type: "text", text: error instanceof Error ? error.message.slice(0, 2000) : "桌面工具失败" }],
+					};
+				}
+				this.builtinPending.delete(response.id);
+				if (!this.closed && !abort.signal.aborted)
+					this.child.postMessage({ type: "builtinResult", id: response.id, value });
+			})();
+			return;
+		}
 		if (response.type === "ready") {
 			clearTimeout(this.startupTimer);
 			this.forkDraft = response.forkDraft;
@@ -230,6 +270,8 @@ export class UtilityHostClient {
 	private fail(error: Error): void {
 		if (this.closed) return;
 		this.closed = true;
+		for (const controller of this.builtinPending.values()) controller.abort();
+		this.builtinPending.clear();
 		clearTimeout(this.startupTimer);
 		this.rejectReady(error);
 		for (const request of this.pending.values()) {

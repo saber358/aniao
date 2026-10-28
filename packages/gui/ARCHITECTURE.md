@@ -22,6 +22,8 @@
 - logger 只记录生命周期，不记录提示词、凭据、工具参数或输出。
 - 第三方消息类型留在 renderer 适配层。组件升级不修改业务协议。
 
+免费内置 MCP 使用官方 MCP 扩展和内存传输，宿主通过关联的反向消息调用主进程。主进程再次校验服务、工具、开关和宿主身份；浏览器控制仅指向所属会话的原生网页，网页没有业务桥或任意调试端口。多个标签按会话保留，动作按标签排队，取消与退出撤销等待。免费网络工具无认证头或浏览器 Cookie，只读公开来源。外部 MCP 仍由 SDK 创建标准 stdio/HTTP 传输；连接观测不替换 SDK 管理器。详见 [免费内置 MCP](docs/builtin-mcp.md)。
+
 **当前实现**
 
 ```text
@@ -89,9 +91,9 @@ SDK 的 abort 可能继续消费后续队列。宿主先同步 clearQueue，保�
 
 Electron 启用 contextIsolation 和 sandbox，关闭 Renderer Node integration。主进程校验窗口及 main frame。Markdown 禁用默认扩展语法，使用标签和协议白名单。外链只允许 http、https、mailto，主进程再次校验。API Key 专用写入 AuthStorage，不进入快照、聊天或日志。
 
-BrowserService 单独持有原生 WebContentsView，网页不在 Renderer 的 iframe 或 WebView 中运行。`shared/browser.ts` 限定地址、固定浏览动作、布局和状态；preload 与 main 校验 schema，只有工作台主框架能创建和控制视图。网页使用 `persist:harness-browser` Session，持久化网站登录，与工作台和 Pi 认证分离；不加载 preload、关闭 Node 和 WebView，权限检查与请求均默认拒绝。用户导航和重定向只允许 HTTP / HTTPS；新窗口请求始终拒绝创建额外窗口，合法地址改在当前视图打开。导航状态由 Chromium 历史和主框架事件提供，旧标签或迟到加载失败不能覆盖当前标签。
+BrowserManager 按会话身份管理多个 BrowserService，每个服务单独持有原生 WebContentsView，网页不在 Renderer 的 iframe 或 WebView 中运行。`shared/browser.ts` 限定地址、固定浏览动作、布局和状态；preload 与 main 校验 schema，手动操作来自工作台主框架，模型操作来自绑定原宿主的 MCP 反向通道。网页使用 `persist:harness-browser` Session，持久化网站登录，与工作台和 Pi 认证分离；不加载 preload、关闭 Node 和 WebView，权限检查与请求均默认拒绝。用户导航和重定向只允许 HTTP / HTTPS；新窗口请求始终拒绝创建额外窗口，合法地址改在当前视图打开。导航状态由 Chromium 历史和主框架事件提供，旧标签或迟到加载失败不能覆盖当前标签。
 
-BrowserPane 用 ResizeObserver 和合并到同一帧的 DOM 观察同步占位区域，主进程按工作台缩放换算坐标并裁到内容区域。原生网页不参与 DOM 层叠，设置、菜单与候选列表可见或正在拖拽分界线时主动隐藏；切换工具和开始页保留实例，关闭标签、关闭侧栏、切换项目、重载主窗与退出释放原生 WebContents。下载默认取消，恢复已提交网页并显示系统浏览器入口；外链仍需用户明确点击。网页原生键盘事件用统一 DEFAULT_APP_KEYBINDINGS 解析，匹配的工作台动作转交原有界面入口。
+BrowserPane 用 ResizeObserver 和合并到同一帧的 DOM 观察同步占位区域，主进程按工作台缩放换算坐标并裁到内容区域。原生网页不参与 DOM 层叠，设置、菜单与候选列表可见或正在拖拽分界线时主动隐藏；切换工具、会话、项目、开始页或收起侧栏均保留实例，关闭标签、重载主窗与退出释放原生 WebContents。后台新标签先有 1024 × 768 隐藏视口，前台展示时采用实际右栏尺寸；后台截图不会把隐藏网页唤到前台。下载默认取消，恢复已提交网页并显示系统浏览器入口；外链仍需用户明确点击。网页原生键盘事件用统一 DEFAULT_APP_KEYBINDINGS 解析，匹配的工作台动作转交原有界面入口。
 
 ```text
 [内置浏览器] ──┬── 地址与控件 ── BrowserPort 校验
@@ -107,7 +109,7 @@ ExtensionUI 对照 RPC 的 ExtensionUIContext，支持 select / confirm / input 
 
 SDK 资源仍按用户选择并信任的项目与既有 Pi 配置发现扩展。宿主先报告传输 ready，再异步绑定 session_start，初始化弹窗可用当前身份回复，避免启动等待 UI 时双方互相等待。WorkspaceService 在切换钩子期间只放行回复、取消与通知关闭；退出会关闭待接替宿主，阻止迟到切换创建新进程。新宿主接收 new / resume / fork 启动原因。资源摘要与诊断已进入会话快照；扩展发起的会话替换和终端组件仍未提供。
 
-MCP 配置修改由 WorkspaceService 在写文件前锁定当前空闲宿主；运行、交互、在途命令或待批准计划期间拒绝修改。McpService 串行读取、原子写入并等待 `reloadResources`，SDK 重载后发布资源快照；重载失败则还原配置并重载原资源，恢复失败提示重新打开项目。重载期间保留扩展回复通道。没有活动项目时只保存全局配置；后台独立宿主下次初始化读取新配置。MCP 连接由 SDK 在后台完成，配置已重载不代表网络连接已成功，连接问题由 SDK 通知显示。
+MCP 配置修改由 WorkspaceService 在写文件前锁定当前空闲宿主；运行、交互、在途命令或待批准计划期间拒绝修改当前宿主。McpService 串行读取、原子写入并等待 `reloadResources`，SDK 重载后发布资源快照；重载失败则还原配置并重载原资源，恢复失败提示重新打开项目。重载期间保留扩展回复通道。没有活动项目时只保存全局配置；其他空闲宿主同步重载，正在运行的宿主在收束后更新，下一任务前再次核对资源修订。MCP 连接由 SDK 在后台完成，配置已重载不代表连接成功；传输观测把实际连接状态、工具数和脱敏错误提供给设置页，并保留 SDK 原有通知。
 
 反馈弹窗不包含账号登录、注册或令牌读取。`feedback-client.ts` 只在点击提交后向反馈 API 发送 multipart，明确省略 Cookie 与 Authorization；正文最多 5000 字，最多 4 张、每张 5 MB 的 PNG/JPEG/WebP/GIF。失败保留正文和图片，关闭弹窗也不清空，成功后才释放预览与表单；卸载取消请求。配套后端允许匿名 POST，匿名记录不绑定用户，后台管理仍鉴权；旧 H2 的 `feedback.user_id` 非空约束由启动迁移幂等移除。
 

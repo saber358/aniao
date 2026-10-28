@@ -61,6 +61,50 @@ class Host extends FakeAgentPort implements ManagedHost {
 describe("WorkspaceService", () => {
 	/*
 	 * ========================================================================
+	 * 步骤12：覆盖多会话全局资源更新
+	 * ========================================================================
+	 * 数据源：两个保留宿主、延迟收束的任务与资源修订。
+	 * 操作：1) 空闲宿主及时刷新；2) 运行任务保留，下一请求前刷新配置。
+	 */
+	it("updates retained idle hosts and applies deferred MCP changes before the next prompt", async () => {
+		logger.info("开始验证多会话 MCP 资源修订");
+		const directory = await mkdtemp(join(tmpdir(), "pi-gui-workspace-"));
+		directories.push(directory);
+		const cwd = await realpath(directory);
+		const first = new Host(cwd, "first");
+		const second = new Host(cwd, "second");
+		const workspace = new WorkspaceService(
+			new WorkspaceStore(join(directory, "state"), logger),
+			vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second),
+			logger,
+		);
+		try {
+			// 12.1 两个空闲会话都必须收到重载，不能仅刷新当前选择。
+			await workspace.attach(cwd);
+			await workspace.newSession();
+			await workspace.changeResources(async (reload) => reload());
+			expect(first.commands.filter((item) => item.command.type === "reloadResources")).toHaveLength(1);
+			expect(second.commands.filter((item) => item.command.type === "reloadResources")).toHaveLength(1);
+			first.current.run.phase = "working";
+			await workspace.changeResources(async (reload) => reload());
+			expect(first.commands.filter((item) => item.command.type === "reloadResources")).toHaveLength(1);
+			// 12.2 旧任务结束后，下一个 prompt 必须排在资源重载之后。
+			first.current.run.phase = "idle";
+			await workspace.dispatch({
+				requestId: "next-prompt",
+				sessionId: "first",
+				generation: first.current.generation,
+				command: { type: "prompt", text: "新的资源" },
+			});
+			expect(first.commands.map((item) => item.command.type)).toEqual(["reloadResources", "reloadResources", "prompt"]);
+			expect((await workspace.getSnapshot())?.sessionId).toBe("second");
+		} finally {
+			await workspace.close();
+			logger.info("多会话 MCP 资源修订验证结束");
+		}
+	});
+	/*
+	 * ========================================================================
 	 * 步骤7：验证资源写入前检查和重载互斥
 	 * ========================================================================
 	 * 数据源：可控活动宿主和配置回调。

@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
 import { zh_cn } from "@nuxt/ui/locale";
 import { isTaskRunning, type ThinkingLevel } from "../shared/protocol.ts";
+import type { BrowserPresentation } from "../shared/builtin-mcp.ts";
 import type { ParallelJob } from "../shared/parallel.ts";
 import type { CustomProviderInput } from "../shared/provider.ts";
 import type { UpdateState } from "../shared/update.ts";
@@ -65,6 +66,8 @@ const updateState = ref<UpdateState | null>(null);
 const updateAction = ref<"check" | "download" | "install" | null>(null);
 const updateError = ref<string | null>(null);
 let unsubscribeUpdate: (() => void) | undefined;
+let unsubscribeBrowserPresentation: (() => void) | undefined;
+const browserPresentations = new Map<string, BrowserPresentation>();
 const sidebarOpen = ref(true);
 const sidebarWidth = ref(280);
 const sidePanelOpen = ref(false);
@@ -136,6 +139,7 @@ const sidePanel = useTemplateRef<{
 	openUrl(url: string): void;
 	openHtmlFile(path: string): void;
 	openSubagent(runId: string, childId?: string): void;
+	openAgentBrowser(id: string, closed?: boolean): void;
 }>("sidePanel");
 const dark = ref(document.documentElement.classList.contains("dark"));
 const snapshot = computed(() => state.value.snapshot);
@@ -181,8 +185,27 @@ watch(
 	() => {
 		planMode.value = false;
 		sidePanelOpen.value = false;
+		const value = snapshot.value;
+		if (value) {
+			const browser = browserPresentations.get(`${value.sessionId}/${value.generation}`);
+			if (browser && !browser.closed) showAgentBrowser(browser);
+		}
 	},
 );
+
+/*
+ * ========================================================================
+ * 步骤8：只在所属会话显示模型浏览器操作
+ * ========================================================================
+ * 数据源：主进程绑定身份的网页展示事件。
+ * 操作：1) 后台任务不切换当前会话；2) 返回所属会话后复用已有网页。
+ */
+function showAgentBrowser(value: BrowserPresentation): void {
+	browserPresentations.set(`${value.sessionId}/${value.generation}`, value);
+	if (snapshot.value?.sessionId !== value.sessionId || snapshot.value.generation !== value.generation) return;
+	if (!value.closed) sidePanelOpen.value = true;
+	void nextTick(() => sidePanel.value?.openAgentBrowser(value.id, value.closed));
+}
 const busy = computed(
 	() =>
 		state.value.connection === "connected" &&
@@ -582,6 +605,7 @@ function openSubagentTab(runId: string, childId?: string): void {
 }
 
 onMounted(() => {
+	unsubscribeBrowserPresentation = bridge.subscribeBrowserPresentation(showAgentBrowser);
 	workspaceResizeObserver = new ResizeObserver(restoreSidebarOnReveal);
 	if (workspaceSplitter.value) workspaceResizeObserver.observe(workspaceSplitter.value.$el);
 	window.addEventListener("keydown", handleSidePanelShortcut, true);
@@ -599,6 +623,7 @@ onMounted(() => {
 		});
 });
 onBeforeUnmount(() => {
+	unsubscribeBrowserPresentation?.();
 	workspaceResizeObserver?.disconnect();
 	document.body.classList.remove("resizing-side-panel");
 	window.removeEventListener("keydown", handleSidePanelShortcut, true);
@@ -1074,8 +1099,11 @@ onBeforeUnmount(() => {
 									</div>
 								</section>
 								<SidePanel
-									v-if="sidePanelOpen && snapshot"
+									v-if="snapshot"
+									v-show="sidePanelOpen"
 									ref="sidePanel"
+									:session-key="`${snapshot.sessionId}/${snapshot.generation}`"
+									:active="sidePanelOpen && !settingsOpen && viewMode === 'app'"
 									:key="`${snapshot.sessionId}-${snapshot.generation}`"
 									:cwd="snapshot.cwd"
 									:subagents="snapshot.extensions.subagents ?? null"

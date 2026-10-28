@@ -6,6 +6,9 @@
 		"noEmit": true,
 		"types": ["node"],
 		"paths": {
+			"@harness/pi-kernel/mcp-runtime": [
+				"./node_modules/@earendil-works/pi-coding-agent/dist/extensions/mcp/runtime.d.ts"
+			],
 			"@harness/pi-kernel/prompt-templates": [
 				"./node_modules/@earendil-works/pi-coding-agent/dist/core/prompt-templates.d.ts"
 			],

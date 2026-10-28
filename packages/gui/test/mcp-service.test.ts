@@ -24,6 +24,31 @@ const logger = { info: vi.fn() };
  * 操作：1) 保存、启停、删除后核对运行态；2) 故障时保留原配置。
  */
 describe("McpService", () => {
+	it("keeps built-ins free and persists their switches without replacing user servers", async () => {
+		logger.info("开始验证内置 MCP 配置持久化");
+		const directory = await mkdtemp(join(tmpdir(), "harness-mcp-"));
+		if (dirname(directory) !== tmpdir()) throw new Error("MCP 测试清理越界");
+		try {
+			// 2.1 新用户默认获得内置工具，停用只保存布尔偏好。
+			const service = new McpService(logger, directory);
+			expect((await service.list()).filter((server) => server.type === "builtin" && server.enabled)).toHaveLength(4);
+			await service.save({ name: "custom", type: "stdio", command: "unused", enabled: false });
+			await service.setEnabled("harness_browser", false);
+			const document = JSON.parse(await readFile(join(directory, "mcp.json"), "utf8"));
+			expect(document.harnessBuiltins).toEqual({ harness_browser: false });
+			expect(document.mcpServers.custom.command).toBe("unused");
+			expect(
+				(await new McpService(logger, directory).list()).find((server) => server.name === "harness_browser")?.enabled,
+			).toBe(false);
+			await expect(service.remove("harness_browser")).rejects.toThrow("不能删除");
+			await expect(service.save({ name: "harness_browser", type: "http", url: "https://example.com" })).rejects.toThrow(
+				"内置",
+			);
+		} finally {
+			await rm(directory, { recursive: true, force: true });
+			logger.info("内置 MCP 配置持久化验证结束");
+		}
+	});
 	it("serializes concurrent saves and preserves unrelated fields on rollback", async () => {
 		logger.info("开始验证 MCP 原子配置和回滚");
 		const directory = await mkdtemp(join(tmpdir(), "harness-mcp-"));
@@ -43,7 +68,9 @@ describe("McpService", () => {
 				service.save({ name: "one", type: "stdio", command: "unused", enabled: false }),
 				service.save({ name: "two", type: "stdio", command: "unused", enabled: false }),
 			]);
-			expect((await service.list()).map((server) => server.name)).toEqual(["keep", "one", "two"]);
+			expect((await service.list()).filter((server) => server.type !== "builtin").map((server) => server.name)).toEqual(
+				["keep", "one", "two"],
+			);
 			const before = JSON.parse(await readFile(file, "utf8"));
 			const reload = vi.fn().mockRejectedValueOnce(new Error("reload failed")).mockResolvedValueOnce(undefined);
 			await expect(service.remove("keep", reload)).rejects.toThrow("已还原");

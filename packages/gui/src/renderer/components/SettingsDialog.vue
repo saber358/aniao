@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import type { AuthenticationState } from "../../shared/interactions.ts";
 import type { McpServerSummary } from "../../shared/mcp.ts";
 import type { Configuration } from "../../shared/protocol.ts";
@@ -116,6 +116,8 @@ const mcpType = ref<"stdio" | "http">("stdio");
 const mcpCommand = ref("");
 const mcpArgs = ref("");
 const mcpUrl = ref("");
+let mcpPoll: ReturnType<typeof setInterval> | undefined;
+let mcpRevision = 0;
 const mcpTypes: Array<{ label: string; value: "stdio" | "http" }> = [
 	{ label: "stdio（本地命令）", value: "stdio" },
 	{ label: "HTTP", value: "http" },
@@ -391,20 +393,61 @@ function saveCustomProvider() {
  * 数据源：主进程原子配置与当前会话重载结果。
  * 操作：1) 禁止连点；2) 失败保留表单，成功后同步列表和状态。
  */
-async function loadMcpServers() {
+async function loadMcpServers(quiet = false) {
 	if (mcpBusy.value) return;
-	logger.info("开始读取 MCP 配置");
-	mcpBusy.value = true;
-	mcpError.value = "";
+	const revision = ++mcpRevision;
+	if (!quiet) {
+		logger.info("开始读取 MCP 配置");
+		mcpBusy.value = true;
+		mcpError.value = "";
+	}
 	try {
-		mcpServers.value = await window.piDesktop.listMcpServers();
+		const servers = await window.piDesktop.listMcpServers();
+		if (revision === mcpRevision) mcpServers.value = servers;
 	} catch (error) {
-		mcpError.value = error instanceof Error ? error.message : "MCP 配置读取失败";
+		if (revision === mcpRevision) mcpError.value = error instanceof Error ? error.message : "MCP 配置读取失败";
 	} finally {
-		mcpBusy.value = false;
-		logger.info("MCP 配置读取结束");
+		if (!quiet) {
+			mcpBusy.value = false;
+			logger.info("MCP 配置读取结束");
+		}
 	}
 }
+
+function mcpStatus(server: McpServerSummary): string {
+	if (!server.enabled) return "已停用";
+	const state = server.connection;
+	if (!state) return props.configuration ? "等待连接" : "打开项目后连接";
+	if (state.state === "connected") return `已连接 · ${state.toolCount} 个工具`;
+	if (state.state === "connecting") return "连接中…";
+	return state.state === "failed" ? "连接失败" : "已断开";
+}
+
+async function reconnectMcpServers(): Promise<void> {
+	if (mcpBusy.value || props.resourcesBusy) return;
+	logger.info("开始重连 MCP 服务器");
+	mcpBusy.value = true;
+	mcpRevision++;
+	try {
+		mcpServers.value = await window.piDesktop.reconnectMcpServers();
+		mcpError.value = "";
+	} catch (error) {
+		mcpError.value = error instanceof Error ? error.message : "MCP 重连失败";
+	} finally {
+		mcpBusy.value = false;
+		logger.info("MCP 服务器重连结束");
+	}
+}
+
+watch([open, active], ([visible, section]) => {
+	clearInterval(mcpPoll);
+	mcpPoll = undefined;
+	if (visible && section === "mcp") mcpPoll = setInterval(() => void loadMcpServers(true), 1500);
+});
+onBeforeUnmount(() => {
+	clearInterval(mcpPoll);
+	mcpRevision++;
+});
 
 function startAddMcp() {
 	if (mcpBusy.value || props.resourcesBusy) return;
@@ -437,23 +480,20 @@ async function saveMcpServer() {
 	mcpBusy.value = true;
 	mcpError.value = "";
 	mcpResult.value = "";
+	mcpRevision++;
 	try {
 		mcpServers.value = await window.piDesktop.saveMcpServer({
 			name,
 			type: mcpType.value,
 			command: mcpType.value === "stdio" ? mcpCommand.value.trim() : undefined,
-			args:
-				mcpType.value === "stdio"
-					? mcpArgs.value
-							.split(/\s+/)
-							.map((item) => item.trim())
-							.filter(Boolean)
-					: undefined,
+			args: mcpType.value === "stdio" ? mcpArgs.value.split(/\r?\n/).filter((item) => item.length > 0) : undefined,
 			url: mcpType.value === "http" ? mcpUrl.value.trim() : undefined,
 			enabled: true,
 		});
 		mcpEditing.value = false;
-		mcpResult.value = props.configuration ? "配置已应用到当前会话" : "配置已保存，打开项目后生效";
+		mcpResult.value = props.configuration
+			? "配置已保存，连接状态见列表；其他运行会话结束后生效。"
+			: "配置已保存，打开项目后生效";
 	} catch (error) {
 		mcpError.value = error instanceof Error ? error.message : "MCP 保存失败";
 	} finally {
@@ -469,9 +509,12 @@ async function toggleMcpServer(server: McpServerSummary) {
 	mcpBusy.value = true;
 	mcpError.value = "";
 	mcpResult.value = "";
+	mcpRevision++;
 	try {
 		mcpServers.value = await window.piDesktop.setMcpServerEnabled(server.name, !server.enabled);
-		mcpResult.value = props.configuration ? "配置已应用到当前会话" : "配置已保存，打开项目后生效";
+		mcpResult.value = props.configuration
+			? "配置已保存，连接状态见列表；其他运行会话结束后生效。"
+			: "配置已保存，打开项目后生效";
 	} catch (error) {
 		mcpError.value = error instanceof Error ? error.message : "MCP 状态更新失败";
 	} finally {
@@ -487,9 +530,12 @@ async function removeMcpServer(server: McpServerSummary) {
 	mcpBusy.value = true;
 	mcpError.value = "";
 	mcpResult.value = "";
+	mcpRevision++;
 	try {
 		mcpServers.value = await window.piDesktop.removeMcpServer(server.name);
-		mcpResult.value = props.configuration ? "配置已应用到当前会话" : "配置已保存，打开项目后生效";
+		mcpResult.value = props.configuration
+			? "配置已保存，连接状态见列表；其他运行会话结束后生效。"
+			: "配置已保存，打开项目后生效";
 	} catch (error) {
 		mcpError.value = error instanceof Error ? error.message : "MCP 删除失败";
 	} finally {
@@ -914,23 +960,44 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 
 				<section v-else-if="active === 'mcp'" class="settings-section models-section">
 					<h3>MCP 服务器</h3>
+					<p class="settings-muted">
+						四项内置能力均免费、免密钥。搜索与 GitHub 公开接口可能限流，不会切换到收费服务。
+					</p>
+					<UButton
+						class="settings-inline-button"
+						color="neutral"
+						variant="soft"
+						size="sm"
+						:disabled="mcpBusy || resourcesBusy || !configuration"
+						@click="reconnectMcpServers"
+						>重新连接</UButton
+					>
 					<p v-if="resourcesBusy && !mcpBusy" class="settings-muted">请等待当前任务、交互或计划结束后再修改。</p>
 					<p v-if="mcpResult" class="settings-muted" role="status">{{ mcpResult }}</p>
 					<div class="provider-list">
 						<div v-for="server in mcpServers" :key="server.name" class="provider-card">
 							<div class="provider-main">
-								<strong>{{ server.name }}</strong>
-								<span class="provider-state" :class="{ offline: !server.enabled }">
+								<strong
+									>{{ server.title ?? server.name
+									}}<small v-if="server.type === 'builtin'" class="mcp-builtin">内置 · 免费</small></strong
+								>
+								<span
+									class="provider-state"
+									:class="{ offline: !server.enabled || server.connection?.state !== 'connected' }"
+								>
 									<i class="provider-dot" aria-hidden="true" />
-									{{ server.enabled ? "已启用" : "已停用" }}
+									{{ mcpStatus(server) }}
 								</span>
 								<span class="mcp-command">
 									{{
 										server.type === "stdio"
 											? [server.command, ...(server.args ?? [])].filter(Boolean).join(" ")
-											: server.url
+											: (server.description ?? server.url)
 									}}
 								</span>
+								<span v-if="server.connection?.error" class="workspace-error mcp-error">{{
+									server.connection.error
+								}}</span>
 							</div>
 							<div class="provider-actions">
 								<button
@@ -944,6 +1011,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 									<span />
 								</button>
 								<UButton
+									v-if="server.type !== 'builtin'"
 									icon="i-lucide-trash-2"
 									color="error"
 									variant="ghost"
@@ -990,12 +1058,13 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 									placeholder="npx"
 									:disabled="mcpBusy"
 								/>
-								<label for="mcp-args">参数（空格分隔）</label>
-								<UInput
+								<label for="mcp-args">参数（每行一个，路径含空格时不加引号）</label>
+								<textarea
 									id="mcp-args"
 									v-model="mcpArgs"
-									class="w-full"
-									placeholder="-y @modelcontextprotocol/server-memory"
+									class="mcp-arguments"
+									:rows="3"
+									:placeholder="'-y\n@modelcontextprotocol/server-memory'"
 									:disabled="mcpBusy"
 								/>
 							</template>
@@ -1436,6 +1505,27 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 	font-size: var(--settings-caption-size);
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+.mcp-builtin {
+	margin-left: 8px;
+	color: var(--faint);
+	font-size: var(--settings-caption-size);
+	font-weight: 400;
+}
+.mcp-error {
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+.mcp-arguments {
+	width: 100%;
+	padding: 8px 10px;
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	background: var(--surface);
+	color: var(--ink);
+	font: inherit;
+	font-size: var(--settings-body-size);
+	resize: vertical;
 }
 .mcp-switch {
 	position: relative;
