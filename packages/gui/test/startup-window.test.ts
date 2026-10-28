@@ -28,6 +28,7 @@ class FakeWindow extends EventEmitter {
 	readonly webContents = Object.assign(new EventEmitter(), {
 		mainFrame: {},
 		send: vi.fn(),
+		reload: vi.fn(),
 		setWindowOpenHandler: vi.fn(),
 		session: { setPermissionRequestHandler: vi.fn() },
 	});
@@ -170,7 +171,9 @@ describe("startup window", () => {
 			// 1.5 首屏未确认必须报告失败，不能无限显示动画或露出空白窗口。
 			startup.connect(main as unknown as BrowserWindow);
 			const rejected = expect(startup.reveal()).rejects.toThrow("工作台界面未能完成加载");
-			await vi.advanceTimersByTimeAsync(15_000);
+			await vi.advanceTimersByTimeAsync(10_000);
+			expect(main.webContents.reload).toHaveBeenCalledOnce();
+			await vi.advanceTimersByTimeAsync(50_000);
 			await rejected;
 			expect(main.show).not.toHaveBeenCalled();
 		} finally {

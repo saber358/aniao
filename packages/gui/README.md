@@ -14,7 +14,7 @@
 
 本包承载 Aniao Harness 桌面界面。Agent 循环、模型接入、工具执行和会话持久化复用现有 Pi 包。
 
-当前桌面分发版本为 `0.80.22`，内核为官方 Pi `1.4.0`。本版修复会话运行标记，移除“待处理”标签，加入右侧图片查看与“已查看 X 张图片”缩略图步骤；发布产物与验收报告保存在 `artifacts/publish-0.80.22-20261027/`。`pi-ai`、`pi-agent-core`、`pi-coding-agent` 与 `pi-tui` 均固定为该内核版本，开发、测试和打包共用同一套发布包；仓库中的 `0.80.6` Pi 源码不再作为桌面入口。课程包 `packages/pi-course` 已按用户要求移除。
+当前桌面分发版本为 `0.80.23`，内核为官方 Pi `1.4.0`。本版扩大启动动画并调整品牌、加载状态和背景构图，提供 Windows x64 与 Linux amd64 `.deb`；发布产物与验收报告保存在 `artifacts/publish-0.80.23-20261028/`。`pi-ai`、`pi-agent-core`、`pi-coding-agent` 与 `pi-tui` 均固定为该内核版本，开发、测试和打包共用同一套发布包；仓库中的 `0.80.6` Pi 源码不再作为桌面入口。课程包 `packages/pi-course` 已按用户要求移除。
 
 侧栏顶部提供品牌、“新会话”主按钮，以及已接通的插件和自动化任务入口。插件页展示当前资源，自动化页管理定时任务与后台任务。显示名称统一为 Aniao Harness，包名、Pi 配置与数据目录沿用原标识。
 
@@ -22,7 +22,7 @@
 
 已接入 Nuxt UI 的分栏、聊天、输入区、菜单和弹窗，正文采用 Comark / Shiki，工程面板使用 Monaco 和 xterm.js。接入边界与后续分期见方案第 7 节。
 
-桌面启动时先展示独立的 480 × 320 无框品牌页：终端标记、Aniao 字标依次淡入，底部细线表示正在加载。颜色沿用工作台的深浅主题，系统开启“减少动态效果”后禁用位移与循环动画。启动页不加载 Vue 或 SDK，不显示虚假百分比。
+桌面启动时先展示独立的 1320 × 880 无框品牌页，与初始化工作台共用外框尺寸，交接时不再突然放大窗口。终端标记与放大的 Aniao 字标依次淡入，加载条和真实状态集中在字标下方，淡网格向四周渐隐。颜色沿用工作台的深浅主题，系统开启“减少动态效果”后禁用位移与循环动画。启动页不加载 Vue 或 SDK，不显示虚假百分比。浏览器预览按同一尺寸展示，视口不足时缩小到可用区域。
 
 工作台完成初始快照、项目列表与首屏布局后才通知启动页退场；正常退场约 180 ms，不强制等待完整品牌动画。首屏确认等待最多 15 秒，退场确认最多 250 ms。启动中可关闭应用，退出后不会再次显示迟到的主窗口。开发服务下可打开 `http://localhost:5173/startup.html` 单独查看动画，添加 `?theme=dark` 查看深色；浏览器预览隐藏原生关闭按钮。
 
@@ -103,7 +103,7 @@ npm run dev --workspace @earendil-works/pi-gui
 
 打开项目后复用现有 Pi 模型与认证，也可在设置里录入 API Key。`models.json`、`settings.json`、`auth.json` 和会话仍使用 Pi 原目录；可用 `PI_CODING_AGENT_DIR` 切到独立目录。工具在本机运行，权限与现有 Pi SDK 一致。
 
-桌面开发入口使用本包固定的官方 Pi 发布包，无需构建仓库其他 Pi 包。宿主启用官方 bundled-node 虚拟模块，磁盘扩展仍可相对导入；OAuth、Bedrock、图片处理与 codemode 工作线程的独立运行文件随宿主保留。当前验证平台为 Windows。
+桌面开发入口使用本包固定的官方 Pi 发布包，无需构建仓库其他 Pi 包。宿主启用官方 bundled-node 虚拟模块，磁盘扩展仍可相对导入；OAuth、Bedrock、图片处理与 codemode 工作线程的独立运行文件随宿主保留。提供 Windows x64 与 Linux amd64 构建入口。
 
 **打包**
 
@@ -114,16 +114,28 @@ npm install --ignore-scripts
 node node_modules/electron/install.js
 ```
 
-生成 NSIS 安装器和免安装目录：
+Windows x64 生成 NSIS 安装器和免安装目录：
 
 ```powershell
 npm run package:win --workspace @earendil-works/pi-gui
 npm run package:dir --workspace @earendil-works/pi-gui
 ```
 
-产物在 `packages/gui/release/`。`Aniao-Harness-Setup-<版本>.exe` 是安装器，`win-unpacked/` 可直接运行。安装包启用 asar，宿主入口和原生模块放在 asar 外；SDK 的主题与资源复制到 `resources/sdk`，主进程在 packaged 模式下把 `PI_PACKAGE_DIR` 指向该目录。
+产物在 `packages/gui/release/`。Windows 安装器命名为 `Aniao-Harness-<版本>-windows-x64-setup.exe`，`win-unpacked/` 可直接运行。Linux 只提供 `Aniao-Harness-<版本>-linux-amd64.deb`，须在独立 Linux amd64 环境安装依赖后构建：
 
-桌面分发版本由 `electron-builder.yml` 的 `extraMetadata.version` 指定，当前为 `0.80.22`；不改动共享 SDK 包版本。发布新桌面版本时须递增该值，客户端比较的是安装包中的应用版本。可用 `--config.directories.output=<目录>` 保留此前产物。
+```bash
+npm ci --ignore-scripts
+export ANIAO_DEFAULT_API_KEY="..."
+npm run package:linux --workspace @earendil-works/pi-gui
+```
+
+Linux 构建需要 Node 22.19+、Python 3、make 与 C++ 编译器。脚本只为 Electron 重建 `node-pty`；不运行其他依赖安装脚本。Windows 与 Linux 不共用 `node_modules`，每次更换平台都使用独立安装目录。两个包均使用 x64/amd64 架构，Intel 与 AMD 共用；本轮不提供 ARM 包。
+
+Linux 包声明 `glibc >= 2.34` 与 GTK/NSS/音频等运行依赖，由 apt 检查。2026-10-28 在 WSL2 Ubuntu 24.04 x64 中完成 `.deb` 安装与正常启动，未使用 `--no-sandbox`；两种平台均通过原生 PTY 计算、真实 SDK 写文件、中文内容和草稿重载验收。其他 Linux 发行版尚未实机验收。验收入口为 `e2e/desktop-platform.mjs`，设置 `PI_GUI_PACKAGED_EXECUTABLE` 指向对应安装程序的实际可执行文件；无桌面环境时可用 `xvfb-run` 提供测试显示。
+
+安装包启用 asar，宿主入口和原生模块放在 asar 外；SDK 的主题与资源复制到 `resources/sdk`，主进程在 packaged 模式下把 `PI_PACKAGE_DIR` 指向该目录。Debian 系安装命令为 `sudo apt install ./Aniao-Harness-<版本>-linux-amd64.deb`。桌面快捷方式与命令 `aniao-harness` 均可启动。
+
+桌面分发版本由 `electron-builder.yml` 的 `extraMetadata.version` 指定，当前为 `0.80.23`；不改动共享 SDK 包版本。发布新桌面版本时须递增该值，客户端比较的是安装包中的应用版本。可用 `--config.directories.output=<目录>` 保留此前产物。
 
 默认 Provider 通过构建时环境变量注入：
 
@@ -136,13 +148,14 @@ npm run package:win --workspace @earendil-works/pi-gui
 
 **内测更新**
 
-应用使用 `electron-updater` 的 generic 更新源，地址写在 `electron-builder.yml` 的 `publish.url`，当前为 HTTP：
+应用使用 `electron-updater` 的 generic 更新源，按系统区分地址。Windows 继续使用现有路径，Linux amd64 使用独立路径：
 
 ```text
 http://117.72.245.101/downloads/updates/win/
+http://117.72.245.101/downloads/updates/linux/x64/
 ```
 
-每次发布必须递增版本号，把安装包、`.blockmap` 和 `latest.yml` 上传到该目录。当前源码在启动 10 秒后检查版本，之后每 30 分钟检查一次，只读取版本信息。发现新版本后，左下角齿轮设置图标左侧显示蓝底白箭头的圆形下载按钮，圆点为 20 px，点击区域为 28 px；点击后才下载，并替换为进度圆环与百分比。下载失败可手动重试，完成后仍需点击「重启并安装」。`0.80.7` 是第一个带更新器的版本，更早版本需要手动安装一次。
+每次发布必须递增版本号，Windows 上传安装器、`.blockmap` 和 `latest.yml`，Linux 上传 `.deb` 和 `latest-linux.yml` 到各自目录。只构建本地安装包不会切换线上更新清单。当前源码在启动 10 秒后检查版本，之后每 30 分钟检查一次，只读取版本信息。发现新版本后，左下角齿轮设置图标左侧显示蓝底白箭头的圆形下载按钮，圆点为 20 px，点击区域为 28 px；点击后才下载，并替换为进度圆环与百分比。下载失败可手动重试，完成后仍需点击「重启并安装」。`0.80.7` 是第一个带更新器的版本，更早版本需要手动安装一次。
 
 「设置 → 通用设置 → 应用更新」保留版本和手动下载操作。右上角「帮助 → 检查更新」与设置中的检查按钮打开居中版本弹窗，按品牌、当前版本、检查结果和底部操作区排列，保留原工作页面。没有新版时显示「当前已是最新版本」及当前版本，有新版时增加最新版本与下载按钮；检查失败显示错误。弹窗和设置使用同一更新状态，只有点击下载按钮才下载；关闭弹窗不会中断下载，没有打开项目时也可使用。
 

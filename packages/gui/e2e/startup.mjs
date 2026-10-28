@@ -112,21 +112,49 @@ try {
 		animation: getComputedStyle(document.querySelector(".startup-mark")).animationName,
 	}));
 	const { height, ...startupState } = state;
-	assert(Math.abs(height - 320) <= 2, `原生窗口高度超出 Windows 边框取整范围：${height}`);
+	assert(Math.abs(height - 880) <= 2, `原生窗口高度超出 Windows 边框取整范围：${height}`);
 	assert.deepEqual(startupState, {
-		width: 480,
+		width: 1320,
 		dark: false,
 		bridge: ["close", "left", "ready", "subscribe"],
 		hasBusinessBridge: false,
 		hasNode: false,
 		animation: "startup-arrive",
 	});
+	// 2.2 品牌在大窗口中占据足够面积，加载区跟随品牌，不再远离到窗口底部。
+	const composition = await splash.evaluate(() => {
+		const brand = document.querySelector(".startup-brand").getBoundingClientRect();
+		const content = document.querySelector(".startup-content").getBoundingClientRect();
+		const loading = document.querySelector(".startup-loading").getBoundingClientRect();
+		return {
+			brandWidth: brand.width,
+			contentHeight: content.height,
+			loadingGap: loading.top - brand.bottom,
+			visible: content.top >= 0 && content.bottom <= innerHeight,
+			centered: Math.abs(content.left + content.width / 2 - innerWidth / 2) < 1,
+		};
+	});
+	assert(composition.brandWidth >= state.width * 0.2, "品牌仍沿用小启动窗口的比例");
+	assert(composition.contentHeight >= state.height * 0.3, "启动主体高度不足");
+	assert(composition.loadingGap > 0 && composition.loadingGap <= 64, "加载状态应紧随品牌展示");
+	assert(composition.visible && composition.centered, "启动主体必须居中并完整显示");
+	results.push("prominent centered brand with nearby loading state and no content clipping");
+	// 2.3 启动页和隐藏的初始化窗口必须拥有相同外框，交接前后不改变窗口位置和大小。
+	const bounds = await application.evaluate(({ BrowserWindow }) => {
+		const windows = BrowserWindow.getAllWindows();
+		return {
+			splash: windows.find((window) => window.webContents.getURL().includes("/startup.html"))?.getBounds(),
+			workbench: windows.find((window) => !window.webContents.getURL().includes("/startup.html"))?.getBounds(),
+		};
+	});
+	assert(bounds.splash);
+	assert.deepEqual(bounds.splash, bounds.workbench);
 	const visibleBefore = await application.evaluate(
 		({ BrowserWindow }) => BrowserWindow.getAllWindows().filter((window) => window.isVisible()).length,
 	);
 	assert.equal(visibleBefore, 1);
-	results.push(`${state.width}x${height} native splash visible; hidden workbench; isolated startup bridge`);
-	// 2.2 媒体偏好在真实 Chromium 中禁用入场、进度和退场动画。
+	results.push(`${state.width}x${height} native splash matches initialization window bounds; isolated startup bridge`);
+	// 2.4 媒体偏好在真实 Chromium 中禁用入场、进度和退场动画。
 	await splash.emulateMedia({ reducedMotion: "reduce" });
 	const motion = await splash.evaluate(() => ({
 		mark: getComputedStyle(document.querySelector(".startup-mark")).animationName,
@@ -143,9 +171,13 @@ try {
 	await main.waitForFunction(() => typeof window.harnessWorkbenchReady === "function");
 	await splashClosed;
 	const visibleAfter = await application.evaluate(({ BrowserWindow }) =>
-		BrowserWindow.getAllWindows().map((window) => ({ visible: window.isVisible(), url: window.webContents.getURL() })),
+		BrowserWindow.getAllWindows().map((window) => ({
+			visible: window.isVisible(),
+			url: window.webContents.getURL(),
+			bounds: window.getBounds(),
+		})),
 	);
-	assert.deepEqual(visibleAfter, [{ visible: true, url: `${renderer}/` }]);
+	assert.deepEqual(visibleAfter, [{ visible: true, url: `${renderer}/`, bounds: bounds.splash }]);
 	results.push("real first-paint acknowledgement reveals workbench and destroys splash");
 	await application.close();
 	application = undefined;

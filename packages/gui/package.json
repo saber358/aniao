@@ -3,7 +3,9 @@
 	"version": "0.80.7",
 	"private": true,
 	"description": "Electron and Vue desktop client for Pi",
+	"homepage": "https://117.72.245.101/",
 	"productName": "Aniao Harness",
+	"desktopName": "com.aniao.harness.desktop",
 	"author": "Aniao",
 	"type": "module",
 	"license": "MIT",
@@ -20,7 +22,8 @@
 		"check:e2e": "node e2e/smoke.mjs",
 		"check:workflows": "node e2e/workflows.mjs",
 		"package:dir": "node scripts/prepare-default-provider.mjs && electron-vite build && electron-builder --win --dir --publish never",
-		"package:win": "node scripts/prepare-default-provider.mjs && electron-vite build && electron-builder --win nsis --publish never"
+		"package:win": "node scripts/prepare-default-provider.mjs && electron-vite build && electron-builder --win nsis --x64 --publish never",
+		"package:linux": "node scripts/prepare-default-provider.mjs && node scripts/prepare-linux-native.mjs && electron-vite build && electron-builder --linux deb --x64 --publish never"
 	},
 	"dependencies": {
 		"@earendil-works/pi-agent-core": "1.4.0",

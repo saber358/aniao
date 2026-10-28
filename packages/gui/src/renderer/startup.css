@@ -4,6 +4,9 @@
 	--startup-ink: #0f1115;
 	--startup-muted: #6b7078;
 	--startup-line: #00000010;
+	--startup-grid: #64748b16;
+	--startup-accent: #4176e6;
+	--startup-glow: #4176e60b;
 	font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
 }
 :root.dark {
@@ -12,6 +15,9 @@
 	--startup-ink: #f9fafb;
 	--startup-muted: #92969d;
 	--startup-line: #ffffff12;
+	--startup-grid: #b4c1d410;
+	--startup-accent: #7fa5ff;
+	--startup-glow: #7fa5ff08;
 }
 * {
 	box-sizing: border-box;
@@ -27,6 +33,7 @@ body {
 }
 .startup {
 	position: relative;
+	isolation: isolate;
 	display: flex;
 	width: 100%;
 	height: 100%;
@@ -34,11 +41,33 @@ body {
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
+	overflow: hidden;
 	user-select: none;
 	-webkit-app-region: drag;
 	transition:
 		opacity 180ms ease,
 		transform 180ms ease;
+}
+.startup::before {
+	position: absolute;
+	z-index: -1;
+	inset: 0;
+	background:
+		linear-gradient(var(--startup-grid) 1px, transparent 1px),
+		linear-gradient(90deg, var(--startup-grid) 1px, transparent 1px);
+	background-position: center;
+	background-size: 56px 56px;
+	mask-image: radial-gradient(ellipse 43% 50% at 50% 48%, #000 20%, transparent 100%);
+	pointer-events: none;
+	content: "";
+}
+.startup::after {
+	position: absolute;
+	z-index: -2;
+	inset: 0;
+	background: radial-gradient(ellipse 35% 40% at 50% 46%, var(--startup-glow), transparent);
+	pointer-events: none;
+	content: "";
 }
 .startup-close {
 	position: absolute;
@@ -68,16 +97,22 @@ body {
 	outline: 1px solid var(--startup-ink);
 	outline-offset: 2px;
 }
+.startup-content {
+	display: flex;
+	width: min(600px, calc(100% - 64px));
+	flex-direction: column;
+	align-items: center;
+	transform: translateY(-8px);
+}
 .startup-brand {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	transform: translateY(-10px);
 }
 .startup-mark {
-	width: 42px;
-	height: 42px;
-	margin-bottom: 12px;
+	width: clamp(48px, 5.5vw, 72px);
+	height: clamp(48px, 5.5vw, 72px);
+	margin-bottom: 22px;
 	animation: startup-arrive 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .dark .startup-mark,
@@ -87,65 +122,61 @@ body {
 .startup h1 {
 	position: relative;
 	margin: 0;
-	font-size: 42px;
+	font-size: clamp(68px, 8.5vw, 112px);
 	font-weight: 650;
 	line-height: 1.1;
-	letter-spacing: -1.8px;
+	letter-spacing: -5px;
 	animation: startup-arrive 650ms 110ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .startup-cursor {
 	position: absolute;
-	right: -9px;
-	bottom: 5px;
-	width: 4px;
-	height: 4px;
+	right: -18px;
+	bottom: 12px;
+	width: 8px;
+	height: 8px;
 	border-radius: 50%;
-	background: currentColor;
+	background: var(--startup-accent);
 	animation: startup-cursor 1600ms 700ms ease-in-out both;
 }
 .startup-name {
-	margin: 12px 0 0;
-	padding-left: 4px;
+	margin: 22px 0 0;
+	padding-left: 9px;
 	color: var(--startup-muted);
 	font-family: "Cascadia Code", Consolas, monospace;
-	font-size: 10px;
+	font-size: 13px;
 	font-weight: 500;
 	line-height: 1;
-	letter-spacing: 4px;
+	letter-spacing: 9px;
 	animation: startup-arrive 650ms 190ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .startup-loading {
-	position: absolute;
-	right: 0;
-	bottom: 34px;
-	left: 0;
 	display: grid;
 	justify-items: center;
-	gap: 12px;
+	gap: 17px;
+	margin-top: 56px;
 	animation: startup-arrive 650ms 280ms ease both;
 }
 .startup-loading p {
 	margin: 0;
 	color: var(--startup-muted);
-	font-size: 10px;
+	font-size: 12px;
 	font-weight: 400;
 	line-height: 1.5;
 	letter-spacing: 0.5px;
 }
 .startup-track {
-	width: 88px;
-	height: 2px;
+	width: 224px;
+	height: 3px;
 	overflow: hidden;
 	border-radius: 2px;
 	background: var(--startup-line);
 }
 .startup-track span {
 	display: block;
-	width: 30px;
+	width: 72px;
 	height: 100%;
 	border-radius: inherit;
-	background: var(--startup-ink);
-	opacity: 0.6;
+	background: var(--startup-accent);
 	animation: startup-sweep 1600ms cubic-bezier(0.65, 0, 0.35, 1) infinite;
 }
 html.leaving .startup {
@@ -161,8 +192,8 @@ html.leaving .startup {
 	background: #111113;
 }
 .preview .startup {
-	width: min(480px, calc(100vw - 40px));
-	height: 320px;
+	width: min(var(--startup-preview-width), calc(100vw - 40px));
+	height: min(var(--startup-preview-height), calc(100vh - 40px));
 	border: 1px solid var(--startup-line);
 	border-radius: 14px;
 	background: var(--startup-surface);
@@ -180,10 +211,10 @@ html.leaving .startup {
 }
 @keyframes startup-sweep {
 	from {
-		transform: translateX(-32px);
+		transform: translateX(-74px);
 	}
 	to {
-		transform: translateX(90px);
+		transform: translateX(226px);
 	}
 }
 @keyframes startup-cursor {
@@ -196,6 +227,27 @@ html.leaving .startup {
 		opacity: 1;
 	}
 }
+@media (max-width: 600px), (max-height: 540px) {
+	.startup-mark {
+		margin-bottom: 16px;
+	}
+	.startup h1 {
+		font-size: 68px;
+		letter-spacing: -3px;
+	}
+	.startup-name {
+		margin-top: 16px;
+		font-size: 11px;
+		letter-spacing: 6px;
+		padding-left: 6px;
+	}
+	.startup-loading {
+		margin-top: 36px;
+	}
+	.startup-track {
+		width: 184px;
+	}
+}
 @media (prefers-reduced-motion: reduce) {
 	*,
 	*::before,
@@ -204,7 +256,7 @@ html.leaving .startup {
 		transition: none !important;
 	}
 	.startup-track span {
-		margin-left: 29px;
+		margin-inline: auto;
 	}
 	.startup-cursor {
 		display: none;

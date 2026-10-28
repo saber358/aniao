@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { BrowserWindow, ipcMain, nativeTheme } from "electron";
 import type { Logger } from "../shared/logger.ts";
 import { PRODUCT_NAME } from "../shared/product.ts";
-import { STARTUP_CHANNELS, type StartupStage } from "../shared/startup.ts";
+import { INITIAL_WINDOW_SIZE, STARTUP_CHANNELS, type StartupStage } from "../shared/startup.ts";
 
 const READY_TIMEOUT_MS = 60_000;
 const RELOAD_TIMEOUT_MS = 10_000;
@@ -35,9 +35,7 @@ export class StartupWindow {
 		this.logger = logger;
 		this.requestQuit = requestQuit;
 		this.window = new BrowserWindow({
-			width: 480,
-			height: 320,
-			useContentSize: true,
+			...INITIAL_WINDOW_SIZE,
 			show: false,
 			frame: false,
 			resizable: false,

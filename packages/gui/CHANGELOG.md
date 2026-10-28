@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added separate Windows x64 NSIS and Linux amd64 Debian packages with platform/architecture filenames, isolated Linux update metadata and an explicit Linux node-pty rebuild before packaging.
+
 - Added image tabs opened from workspace files, with PNG/JPEG/GIF/WebP/SVG previews, image dimensions, zoom, original size, automatic panel fitting and retry after read or decoding failures. See [image previews](docs/image-preview.md).
 
 - Added concurrent ordinary sessions with retained SDK hosts, independent controllers and drafts, per-session running/attention indicators, and direct navigation back from plugin or automation pages while tasks continue.
@@ -78,6 +80,8 @@
 - Added a compact blue circular download button immediately left of the sidebar Settings gear, with a white arrow and live progress ring, plus a Help menu that opens a centered version dialog with current/latest versions and explicit check, download, retry, and install actions.
 
 ### Changed
+
+- Enlarged the startup animation window to the same 1320 × 880 bounds as the initialization workbench, with a prominent centered wordmark, nearby loading state, subtle fading grid and responsive browser previews.
 
 - Show successful image reads as a collapsed “已查看 X 张图片” step with one row of lazy-loaded thumbnails, grouping consecutive reads and restoring the same images from SDK tool history.
 

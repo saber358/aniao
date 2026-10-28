@@ -1,4 +1,5 @@
 import { createLogger } from "../shared/logger.ts";
+import { INITIAL_WINDOW_SIZE } from "../shared/startup.ts";
 
 const logger = createLogger("startup-renderer");
 
@@ -30,6 +31,8 @@ systemTheme.addEventListener("change", applyTheme);
 
 // 1.2 无桌面桥时只展示启动页，不伪造文件或会话能力。
 const bridge = window.harnessStartup;
+document.documentElement.style.setProperty("--startup-preview-width", `${INITIAL_WINDOW_SIZE.width}px`);
+document.documentElement.style.setProperty("--startup-preview-height", `${INITIAL_WINDOW_SIZE.height}px`);
 document.documentElement.classList.toggle("preview", !bridge);
 const close = document.querySelector<HTMLButtonElement>(".startup-close");
 if (close) {

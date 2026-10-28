@@ -34,6 +34,7 @@ import { PRODUCT_NAME } from "../shared/product.ts";
 import { projectDirectorySchema, projectReadSchema } from "../shared/project-browser.ts";
 import { clipboardTextSchema, commandEnvelopeSchema, IPC_CHANNELS } from "../shared/protocol.ts";
 import { scheduleCreateSchema, scheduleIdSchema, schedulePauseSchema } from "../shared/schedule.ts";
+import { INITIAL_WINDOW_SIZE } from "../shared/startup.ts";
 import { subagentOutputRequestSchema } from "../shared/subagents.ts";
 import {
 	terminalCloseSchema,
@@ -213,8 +214,7 @@ export async function startApplication(): Promise<void> {
 	await schedule.initialize();
 	if (quitting) return;
 	const window = new BrowserWindow({
-		width: 1320,
-		height: 880,
+		...INITIAL_WINDOW_SIZE,
 		minWidth: 1100,
 		minHeight: 720,
 		title: PRODUCT_NAME,

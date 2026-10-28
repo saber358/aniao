@@ -4,20 +4,18 @@ copyright: Copyright © 2026 Aniao
 
 # 桌面安装器独立记录分发版本，不改动共享 SDK 包的版本。
 extraMetadata:
-   version: 0.80.22
+   version: 0.80.23
 
 releaseInfo:
    releaseNotes: |
-      - 修复打开会话就显示运行转圈、任务结束后转圈残留的问题。
-      - 移除会话标签右侧的“待处理”提示。
-      - 右侧工作区文件支持图片预览、缩放、原始大小、适应窗口和失败重试。
-      - 图片读取步骤显示“已查看 X 张图片”，展开后在下一行显示缩略图。
-      - 保留工具返回的图片，支持原图删除后查看与重启恢复。
+      - 启动动画扩大到与初始化工作台相同尺寸，切换时保持窗口位置与大小。
+      - 放大品牌字标，加载状态集中在品牌下方，增加向四周渐隐的淡网格。
+      - 更新官方页面，提供 Windows x64 和 Linux amd64 Debian 安装包。
 
 directories:
    output: release
 
-# 内测更新通道：客户端从静态目录读取 latest.yml，不使用 HTTPS 或代码签名。
+# Windows 与 Linux 分别读取自己的更新清单。
 publish:
    provider: generic
    url: http://117.72.245.101/downloads/updates/win/
@@ -46,7 +44,7 @@ asarUnpack:
    - "**/*.node"
    - "**/node-pty/**"
 
-# 原生模块已随依赖提供预编译产物，安装阶段不重新编译。
+# Windows 使用预编译模块；Linux 在打包前单独编译并验证 node-pty。
 npmRebuild: false
 
 # 网络受限时从镜像下载 Electron；可用 ELECTRON_MIRROR 覆盖。
@@ -58,7 +56,39 @@ win:
       - target: nsis
         arch:
            - x64
-   artifactName: Aniao-Harness-Setup-${version}.${ext}
+   artifactName: Aniao-Harness-${version}-windows-${arch}-setup.${ext}
+
+linux:
+   target:
+      - target: deb
+        arch:
+           - x64
+   executableName: aniao-harness
+   syncDesktopName: true
+   category: Development
+   maintainer: Aniao
+   artifactName: Aniao-Harness-${version}-linux-amd64.${ext}
+   publish:
+      provider: generic
+      url: http://117.72.245.101/downloads/updates/linux/x64/
+
+deb:
+   packageName: aniao-harness
+   recommends: []
+   depends:
+      - libc6 (>= 2.34)
+      - libstdc++6
+      - libgtk-3-0
+      - libnotify4
+      - libnss3
+      - libxss1
+      - libxtst6
+      - xdg-utils
+      - libatspi2.0-0
+      - libuuid1
+      - libsecret-1-0
+      - libgbm1
+      - libasound2 | libasound2t64
 
 nsis:
    oneClick: false
