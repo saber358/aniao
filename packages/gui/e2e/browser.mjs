@@ -197,7 +197,7 @@ async function poll(read, message, timeout = 10000) {
 }
 
 export async function screenshotBrowser(test, name) {
-	const bytes = await test.application.evaluate(async ({ BrowserWindow, desktopCapturer }) => {
+	const bytes = await test.application.evaluate(async ({ BrowserWindow, desktopCapturer, screen }) => {
 		const window = BrowserWindow.getAllWindows().find(
 			(candidate) => !candidate.webContents.getURL().includes("startup.html"),
 		);
@@ -206,8 +206,29 @@ export async function screenshotBrowser(test, name) {
 		const source = (await desktopCapturer.getSources({ types: ["window"], thumbnailSize: { width, height } })).find(
 			(candidate) => candidate.id === window.getMediaSourceId(),
 		);
-		if (!source || source.thumbnail.isEmpty()) throw new Error("无法截取包含原生网页的窗口");
-		return source.thumbnail.resize({ width, height, quality: "best" }).toPNG();
+		if (source && !source.thumbnail.isEmpty())
+			return source.thumbnail.resize({ width, height, quality: "best" }).toPNG();
+		/*
+		 * ========================================================================
+		 * 步骤4：在无窗口管理器的 Linux 虚拟桌面保留原生网页截图
+		 * ========================================================================
+		 * 数据源：目标窗口所属屏幕的真实桌面图像。
+		 * 操作：1) 独立 Xvfb 不提供窗口缩略图时截取屏幕；2) 按内容边界裁切。
+		 */
+		console.info("开始核对 Linux 虚拟桌面截图");
+		try {
+			if (process.platform !== "linux") throw new Error("无法截取包含原生网页的窗口");
+			// 4.1 原生网页在独立 WebContentsView，不能用 Renderer 截图替代。
+			const bounds = window.getContentBounds();
+			const display = screen.getDisplayMatching(bounds);
+			const screens = await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: display.size });
+			const desktop = screens.find((candidate) => candidate.display_id === String(display.id));
+			if (!desktop || desktop.thumbnail.isEmpty()) throw new Error("无法截取包含原生网页的 Linux 桌面");
+			const thumbnail = desktop.thumbnail.resize({ ...display.size, quality: "best" });
+			return thumbnail.crop({ x: bounds.x - display.bounds.x, y: bounds.y - display.bounds.y, width, height }).toPNG();
+		} finally {
+			console.info("Linux 虚拟桌面截图核对结束");
+		}
 	});
 	await writeFile(join(test.artifacts, `${name}.png`), bytes);
 	return bytes;
