@@ -25,23 +25,23 @@ export function useWorkspace() {
 	const projects = shallowRef<ProjectSummary[]>([]);
 	const sessionRuntimes = shallowRef<SessionRuntime[]>([]);
 	let libraryRequest = 0;
+	let projectsRequest = 0;
 	const releaseRuntimes = bridge.subscribe((notification) => {
 		if (notification.type !== "sessions") return;
 		sessionRuntimes.value = notification.sessions;
-		void refreshLibrary();
-		void refreshProjects();
+		if (!changing.value) void refreshLibrary();
 	});
 	const unsubscribe = controller.subscribe((next) => {
 		const previous = state.value.snapshot;
 		state.value = next;
 		if (
+			!changing.value &&
 			next.snapshot &&
 			(previous?.sessionId !== next.snapshot.sessionId ||
 				previous.title !== next.snapshot.title ||
 				(previous.run.phase !== "idle" && next.snapshot.run.phase === "idle"))
 		) {
 			void refreshLibrary();
-			void refreshProjects();
 		}
 	});
 
@@ -49,16 +49,22 @@ export function useWorkspace() {
 		const request = ++libraryRequest;
 		try {
 			const next = await bridge.getLibrary();
-			if (request === libraryRequest && next?.cwd === state.value.snapshot?.cwd) library.value = next;
+			if (request !== libraryRequest) return;
+			if (next?.cwd === state.value.snapshot?.cwd) library.value = next;
+			// 1.3 摘要写入后再读取列表，避免旧项目列表覆盖本次更新。
+			await refreshProjects();
 		} catch (error) {
 			if (request === libraryRequest) actionError.value = error instanceof Error ? error.message : "历史加载失败";
 		}
 	}
 	async function refreshProjects() {
+		const request = ++projectsRequest;
 		try {
-			projects.value = await bridge.getProjects();
+			const next = await bridge.getProjects();
+			if (request === projectsRequest) projects.value = next;
 		} catch (error) {
-			actionError.value = error instanceof Error ? error.message : "工作区列表加载失败";
+			if (request === projectsRequest)
+				actionError.value = error instanceof Error ? error.message : "工作区列表加载失败";
 		}
 	}
 	onMounted(async () => {
@@ -75,7 +81,6 @@ export function useWorkspace() {
 			await controller.connect();
 			await Promise.all([
 				refreshLibrary(),
-				refreshProjects(),
 				bridge.getSessionRuntimes().then((value) => {
 					sessionRuntimes.value = value;
 				}),
@@ -104,7 +109,6 @@ export function useWorkspace() {
 			else if (!(await bridge.openProject())) return;
 			await controller.refresh();
 			await refreshLibrary();
-			await refreshProjects();
 		} catch (error) {
 			actionError.value = error instanceof Error ? error.message : String(error);
 		} finally {
@@ -122,7 +126,6 @@ export function useWorkspace() {
 			await operation();
 			await controller.refresh();
 			await refreshLibrary();
-			await refreshProjects();
 		} catch (error) {
 			actionError.value = error instanceof Error ? error.message : "会话切换失败";
 		} finally {
@@ -157,7 +160,6 @@ export function useWorkspace() {
 			await bridge.updateSession(change);
 			await controller.refresh();
 			await refreshLibrary();
-			await refreshProjects();
 			return true;
 		} catch (error) {
 			actionError.value = error instanceof Error ? error.message : "会话更新失败";
@@ -186,7 +188,6 @@ export function useWorkspace() {
 			await bridge.removeWorkspace(cwd);
 			await controller.refresh();
 			await refreshLibrary();
-			await refreshProjects();
 			return true;
 		} catch (error) {
 			actionError.value = error instanceof Error ? error.message : "工作区移除失败";

@@ -95,6 +95,31 @@ describe("WorkspaceStore", () => {
 		expect(await restored.projectName("C:/项目一")).toBeUndefined();
 	});
 
+	it("keeps saved session positions when SDK timestamps or order change across restarts", async () => {
+		logger.info("开始验证会话顺序跨刷新和重启保持");
+		const directory = await mkdtemp(join(tmpdir(), "pi-gui-store-"));
+		directories.push(directory);
+		const cwd = "C:/固定顺序";
+		const store = new WorkspaceStore(directory, logger);
+		const first = { ...session, id: "first", persisted: true, updatedAt: 3 };
+		const second = { ...session, id: "second", persisted: true, updatedAt: 2 };
+		try {
+			// 1.1 导航和 SDK 按新修改时间排序时，旧会话仍保留原位置。
+			await store.rememberSessions(cwd, [first, second]);
+			await store.remember(cwd, { ...second, updatedAt: 100 }, true);
+			await store.rememberSessions(cwd, [{ ...second, updatedAt: 100 }, first]);
+			expect((await store.sessions(cwd)).map((item) => item.id)).toEqual(["first", "second"]);
+			const restored = new WorkspaceStore(directory, logger);
+			expect((await restored.sessions(cwd)).map((item) => item.id)).toEqual(["first", "second"]);
+			expect((await restored.sessions(cwd))[1].updatedAt).toBe(100);
+			// 1.2 只有新出现的会话插入前面，之后的摘要刷新也不再重排。
+			await restored.rememberSessions(cwd, [{ ...session, id: "new", persisted: true }, second, first]);
+			expect((await restored.sessions(cwd)).map((item) => item.id)).toEqual(["new", "first", "second"]);
+		} finally {
+			logger.info("会话顺序跨刷新和重启保持验证结束");
+		}
+	});
+
 	it("serializes concurrent writes and rejects stale revisions without poisoning future writes", async () => {
 		const directory = await mkdtemp(join(tmpdir(), "pi-gui-store-"));
 		directories.push(directory);

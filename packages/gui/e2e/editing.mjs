@@ -155,13 +155,13 @@ try {
 	 */
 	logger.info("开始验证编辑菜单与焦点");
 	await edit("设置");
-	await page.getByRole("dialog", { name: "设置", exact: true }).waitFor();
-	await page.keyboard.press("Escape");
-	await page.getByRole("dialog").waitFor({ state: "hidden" });
+	await page.locator(".settings-page").waitFor();
+	await page.getByRole("button", { name: "返回工作区", exact: true }).click();
+	await page.locator(".settings-page").waitFor({ state: "hidden" });
 	await page.keyboard.press("Control+,");
-	await page.getByRole("dialog", { name: "设置", exact: true }).waitFor();
-	await page.keyboard.press("Escape");
-	await page.getByRole("dialog").waitFor({ state: "hidden" });
+	await page.locator(".settings-page").waitFor();
+	await page.getByRole("button", { name: "返回工作区", exact: true }).click();
+	await page.locator(".settings-page").waitFor({ state: "hidden" });
 	await application.evaluate(({ dialog }, cwd) => {
 		dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [cwd] });
 	}, project);
@@ -224,7 +224,8 @@ try {
 	 * 操作：1) 暂存与取消保留原内容；2) 窄栏和放大状态不替换会话。
 	 */
 	logger.info("开始验证右栏变更");
-	await page.getByRole("button", { name: "打开变更", exact: true }).click();
+	await page.getByRole("button", { name: "展开右侧面板", exact: true }).click();
+	await page.locator(".side-tool").filter({ hasText: "变更" }).click();
 	await page.locator(".change-row").filter({ hasText: "README.md" }).click();
 	await page.getByRole("button", { name: "暂存", exact: true }).click();
 	await page.getByRole("button", { name: "取消暂存", exact: true }).waitFor();

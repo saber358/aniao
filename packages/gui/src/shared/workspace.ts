@@ -40,7 +40,7 @@ export const librarySchema = z.object({
 export const projectSummarySchema = z.object({
 	cwd: z.string().min(1).max(4096),
 	name: z.string().min(1).max(200),
-	sessions: z.array(sessionItemSchema).max(100),
+	sessions: z.array(sessionItemSchema).max(20000),
 });
 export const workspacePathSchema = z.string().min(1).max(4096);
 export const sessionIdentitySchema = z

@@ -82,6 +82,69 @@ class Host extends FakeAgentPort implements ManagedHost {
  * 操作：1) 两个任务同时运行并反复切换；2) 输出、取消、故障和输入各自隔离。
  */
 describe("multiple retained sessions", () => {
+	/*
+	 * ========================================================================
+	 * 步骤2：验证切换准备期间保留已有界面
+	 * ========================================================================
+	 * 数据源：可暂停的目标快照与真实 Controller 注册表。
+	 * 操作：1) 首次打开与返回缓存会话都等待就绪；2) 不发布空快照或连接中状态。
+	 */
+	it("keeps the current view until new and retained session snapshots are ready", async () => {
+		logger.info("开始验证会话界面无空状态切换");
+		const fixture = new FakeAgentPort();
+		const first = { ...snapshot(), sessionId: "first", generation: "first-host" };
+		const second = { ...snapshot(), sessionId: "second", generation: "second-host" };
+		let selected = first;
+		let waiting = Promise.resolve();
+		let entered = () => {};
+		let release = () => {};
+		const port = {
+			getSnapshot: async () => selected,
+			getSessionSnapshot: async () => {
+				entered();
+				await waiting;
+				return selected;
+			},
+			dispatch: fixture.dispatch.bind(fixture),
+			subscribe: fixture.subscribe.bind(fixture),
+		};
+		const controllers = new SessionControllers(port, logger, fixture);
+		const observed: { id: string | undefined; connection: string }[] = [];
+		const unsubscribe = controllers.subscribe((state) =>
+			observed.push({ id: state.snapshot?.sessionId, connection: state.connection }),
+		);
+		try {
+			await controllers.connect();
+			for (const target of [second, first]) {
+				// 2.1 目标快照等待时，当前会话和侧栏仍保持已连接画面。
+				const previous = controllers.value.snapshot?.sessionId;
+				const started = new Promise<void>((resolve) => {
+					entered = resolve;
+				});
+				waiting = new Promise<void>((resolve) => {
+					release = resolve;
+				});
+				selected = target;
+				observed.length = 0;
+				const pending = controllers.refresh();
+				await started;
+				expect(controllers.value.snapshot?.sessionId).toBe(previous);
+				expect(controllers.value.connection).toBe("connected");
+				release();
+				await pending;
+				// 2.2 完整目标状态一次发布，不出现先清空再填回的中间帧。
+				expect(controllers.value.snapshot?.sessionId).toBe(target.sessionId);
+				expect(observed).not.toHaveLength(0);
+				expect(observed.every((value) => value.id && value.connection === "connected")).toBe(true);
+			}
+		} finally {
+			release();
+			unsubscribe();
+			controllers.dispose();
+			logger.info("会话界面无空状态切换验证结束");
+		}
+	});
+
 	it("runs two sessions concurrently and preserves per-session drafts and pending commands", async () => {
 		logger.info("开始验证多会话并发与草稿隔离");
 		const directory = await mkdtemp(join(tmpdir(), "pi-multi-session-"));

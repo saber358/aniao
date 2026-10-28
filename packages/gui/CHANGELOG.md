@@ -81,6 +81,8 @@
 
 ### Changed
 
+- Keep workspace and session positions fixed when navigating, retain explicit pinning, show available sessions directly for other workspaces, widen and center settings content, and move the Changes entry exclusively into the right panel.
+
 - Enlarged the startup animation window to the same 1320 × 880 bounds as the initialization workbench, with a prominent centered wordmark, nearby loading state, subtle fading grid and responsive browser previews.
 
 - Show successful image reads as a collapsed “已查看 X 张图片” step with one row of lazy-loaded thumbnails, grouping consecutive reads and restoring the same images from SDK tool history.
@@ -101,6 +103,14 @@
 - Application updates now require an explicit download click from the sidebar, General Settings, or Help; automatic checks only fetch metadata, and all three entry points share progress and retry state.
 
 ### Fixed
+
+- Keep sidebar typography, spacing, icons and menu slots unchanged when selecting a session, using the same rows and pagination for every workspace; only sessions show a selected background.
+
+- Allow session renaming, pinning and archiving across all remembered workspaces without changing the active session, including native history renaming after restart without opening another host.
+
+- Prevent sidebar flashes during navigation by retaining the previous view until the target snapshot and draft are ready, preserving button appearance, and ordering list refreshes with stale-result rejection.
+
+- Preserve right-panel tabs, file previews, terminal instances and native browser state when toggling the left sidebar by retaining the main splitter panel identity.
 
 - Fixed sessions showing a running spinner when merely opened: distinguish extension initialization from task preparation, reconcile host state after subscribing without accepting stale snapshots, and keep pending metadata commands out of task indicators.
 

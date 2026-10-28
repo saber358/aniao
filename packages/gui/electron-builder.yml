@@ -4,13 +4,14 @@ copyright: Copyright © 2026 Aniao
 
 # 桌面安装器独立记录分发版本，不改动共享 SDK 包的版本。
 extraMetadata:
-   version: 0.80.23
+   version: 0.80.24
 
 releaseInfo:
    releaseNotes: |
-      - 启动动画扩大到与初始化工作台相同尺寸，切换时保持窗口位置与大小。
-      - 放大品牌字标，加载状态集中在品牌下方，增加向四周渐隐的淡网格。
-      - 更新官方页面，提供 Windows x64 和 Linux amd64 Debian 安装包。
+      - 固定工作区和会话位置，选中会话只改变背景，切换时侧栏不再闪烁。
+      - 支持跨工作区重命名、置顶和归档，不切换当前会话。
+      - 加宽并居中设置内容，移除右上角变更按钮，从右侧栏进入。
+      - 展开和收起左侧栏时，保留右侧文件、终端和网页状态。
 
 directories:
    output: release

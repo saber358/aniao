@@ -850,9 +850,6 @@ a {
 .project-open .project-icon {
 	color: var(--faint);
 }
-.project-row.current .project-icon {
-	color: var(--accent);
-}
 .project-name {
 	overflow: hidden;
 	text-overflow: ellipsis;
@@ -1220,7 +1217,6 @@ button.process-trigger:hover {
 	transition: opacity 0.12s ease;
 }
 .session-row:hover button[aria-label^="会话操作"],
-.session-row.active button[aria-label^="会话操作"],
 .session-row button[aria-label^="会话操作"]:focus-visible {
 	opacity: 1;
 }

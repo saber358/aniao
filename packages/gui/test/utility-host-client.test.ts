@@ -29,6 +29,33 @@ class ChildProcessFixture extends EventEmitter {
 describe("UtilityHostClient", () => {
 	/*
 	 * ========================================================================
+	 * 步骤5：验证历史重命名携带可信工作区
+	 * ========================================================================
+	 * 数据源：宿主客户端与跨进程请求校验。
+	 * 操作：1) 原样传输主进程选定目录；2) 用关联结果结束请求。
+	 */
+	it("roundtrips a historical rename with the selected workspace directory", async () => {
+		logger.info("开始验证跨工作区重命名传输");
+		const child = new ChildProcessFixture();
+		vi.mocked(utilityProcess.fork).mockReturnValue(child as unknown as UtilityProcess);
+		const client = new UtilityHostClient("host.mjs", "C:/active", { type: "recent" }, logger, "C:/sdk", "C:/state");
+		child.emit("message", { type: "ready" });
+		try {
+			// 5.1 目标项目和当前宿主项目可以不同，目录始终来自主进程。
+			const pending = client.renameSession("history", "新名称", "C:/other");
+			await Promise.resolve();
+			const request = child.postMessage.mock.calls.at(-1)?.[0];
+			expect(request).toMatchObject({ type: "renameSession", sessionId: "history", title: "新名称", cwd: "C:/other" });
+			child.emit("message", { type: "result", id: request?.id });
+			await pending;
+		} finally {
+			await client.close();
+			logger.info("跨工作区重命名传输验证结束");
+		}
+	});
+
+	/*
+	 * ========================================================================
 	 * 步骤4：核对目标确认和会话读取的独立传输
 	 * ========================================================================
 	 * 数据源：真实宿主客户端和受控 utilityProcess。

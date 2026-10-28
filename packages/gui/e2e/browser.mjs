@@ -162,7 +162,7 @@ export async function startBrowserTest(options = {}) {
 		}, project);
 		await page.getByRole("button", { name: "打开项目", exact: true }).last().click();
 		await page.locator(".composer textarea").waitFor();
-		await poll(async () => page.getByRole("button", { name: "打开变更", exact: true }).isEnabled(), "项目尚未就绪");
+		await poll(async () => page.getByRole("button", { name: "展开右侧面板", exact: true }).isEnabled(), "项目尚未就绪");
 		logger.info("内置浏览器验收准备结束");
 		return {
 			application,
@@ -313,7 +313,7 @@ export async function runBrowserChecks(test) {
 		const viewId = (await browserViewState(test))[0].id;
 		await page.getByRole("button", { name: "打开开始页", exact: true }).click();
 		await visibleView(false);
-		await page.getByRole("button", { name: /浏览器.*浏览网页与本地开发页面/ }).click();
+		await page.getByRole("tab", { name: /^浏览器/ }).click();
 		await visibleView(true);
 		assert.equal((await browserViewState(test))[0].id, viewId);
 		assert.equal(await guest.getByRole("textbox", { name: "页面输入", exact: true }).inputValue(), "保留页面状态");
@@ -337,11 +337,11 @@ export async function runBrowserChecks(test) {
 			contents.sendInputEvent({ type: "keyDown", keyCode: ",", modifiers: ["control"] });
 			contents.sendInputEvent({ type: "keyUp", keyCode: ",", modifiers: ["control"] });
 		}, baseUrl);
-		await page.getByRole("dialog", { name: "设置", exact: true }).waitFor();
+		await page.locator(".settings-page").waitFor();
 		await visibleView(false);
 		await screenshotBrowser(test, "03-settings-overlay");
-		await page.keyboard.press("Escape");
-		await page.getByRole("dialog").waitFor({ state: "hidden" });
+		await page.getByRole("button", { name: "返回工作区", exact: true }).click();
+		await page.locator(".settings-page").waitFor({ state: "hidden" });
 		await visibleView(true);
 		await page.getByRole("button", { name: "编辑", exact: true }).click();
 		await page.getByRole("menu").waitFor();

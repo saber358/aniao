@@ -89,8 +89,8 @@ export class UtilityHostClient {
 		return response.url;
 	}
 
-	async renameSession(sessionId: string, title: string): Promise<void> {
-		await this.request({ type: "renameSession", id: randomUUID(), sessionId, title });
+	async renameSession(sessionId: string, title: string, cwd: string): Promise<void> {
+		await this.request({ type: "renameSession", id: randomUUID(), sessionId, title, cwd });
 	}
 	async listPlugins(): Promise<PluginPackage[]> {
 		const response = await this.request({ type: "plugins", id: randomUUID(), action: "list" });

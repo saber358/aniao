@@ -88,17 +88,26 @@ export class SessionLibrary {
 		}
 	}
 
-	async rename(sessionId: string, title: string): Promise<void> {
+	/*
+	 * ========================================================================
+	 * 步骤2：更新主进程确认过的目标会话名称
+	 * ========================================================================
+	 * 数据源：目标工作区 SDK 索引与本宿主活动会话。
+	 * 操作：1) 活动会话改内存名称；2) 其他历史只追加原生名称记录。
+	 */
+	async rename(sessionId: string, title: string, cwd: string): Promise<void> {
 		this.logger.info("开始重命名 SDK 会话");
 		try {
-			if (!this.session.isIdle) throw new Error("请等待当前任务结束后重命名");
-			if (sessionId === this.session.sessionId) this.session.setSessionName(title);
-			else {
-				const cwd = this.session.sessionManager.getCwd();
+			// 2.1 同时核对目录和身份，不能把其他工作区的请求写入当前会话。
+			if (resolve(cwd) === resolve(this.session.sessionManager.getCwd()) && sessionId === this.session.sessionId) {
+				if (!this.session.isIdle) throw new Error("请等待当前任务结束后重命名");
+				this.session.setSessionName(title);
+			} else {
+				// 2.2 目标未打开时直接更新已查证历史，不创建 Agent 或切换活动会话。
 				const entry = (await SessionManager.list(cwd)).find(
 					(item) => item.id === sessionId && resolve(item.cwd) === resolve(cwd),
 				);
-				if (!entry) throw new Error("会话已不在当前项目中");
+				if (!entry) throw new Error("会话已不在该工作区中");
 				SessionManager.open(entry.path).appendSessionInfo(title);
 			}
 		} finally {

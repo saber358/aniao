@@ -142,30 +142,53 @@ export class WorkspaceStore {
 
 	rememberSessions(cwd: string, entries: SessionSummary[]): Promise<void> {
 		return this.serialize(async () => {
-			const current = await this.readIndex();
-			const previous = new Map(
-				current.sessions.filter((item) => item.cwd === cwd).map((item) => [item.id, item] as const),
-			);
-			const known = new Set(entries.map((entry) => entry.id));
-			const sessions: SavedSession[] = [
-				...entries.slice(0, SESSION_BATCH_LIMIT).map((entry) => ({
-					...entry,
-					cwd,
-					pinned: previous.get(entry.id)?.pinned ?? false,
-					archived: previous.get(entry.id)?.archived ?? false,
-				})),
-				// 未落盘会话不在 SDK 列表中，仍保留桌面身份供恢复。
-				...current.sessions.filter((item) => item.cwd === cwd && !item.persisted && !known.has(item.id)),
-			];
-			const all = [...current.sessions.filter((item) => item.cwd !== cwd), ...sessions];
-			const next: Index = {
-				...current,
-				projects: projectList([...current.projects, cwd], all, current.active),
-				sessions: all,
-			};
-			if (JSON.stringify(current) === JSON.stringify(next)) return;
-			await writeJsonAtomically(this.directory, "index.json", next, this.logger);
-			this.index = next;
+			/*
+			 * ========================================================================
+			 * 步骤2：刷新会话摘要并保留已保存的列表顺序
+			 * ========================================================================
+			 * 数据源：当前索引顺序与 SDK 返回的最新摘要。
+			 * 操作：1) 旧会话只更新内容；2) 新会话放在前面，未落盘身份继续保留。
+			 */
+			this.logger.info("开始刷新会话摘要和固定顺序");
+			try {
+				const current = await this.readIndex();
+				const previous = new Map(
+					current.sessions.filter((item) => item.cwd === cwd).map((item) => [item.id, item] as const),
+				);
+				// 2.1 SDK 修改时间只影响显示，不再影响已存在会话的位置。
+				const latest = new Map(
+					entries.slice(0, SESSION_BATCH_LIMIT).map(
+						(entry) =>
+							[
+								entry.id,
+								{
+									...entry,
+									cwd,
+									pinned: previous.get(entry.id)?.pinned ?? false,
+									archived: previous.get(entry.id)?.archived ?? false,
+								},
+							] as const,
+					),
+				);
+				const sessions: SavedSession[] = [
+					...[...latest.values()].filter((item) => !previous.has(item.id)),
+					...[...previous.values()].flatMap((item) => {
+						const summary = latest.get(item.id);
+						return summary ? [summary] : item.persisted ? [] : [item];
+					}),
+				];
+				const all = [...current.sessions.filter((item) => item.cwd !== cwd), ...sessions];
+				const next: Index = {
+					...current,
+					projects: projectList([...current.projects, cwd], all, current.active),
+					sessions: all,
+				};
+				if (JSON.stringify(current) === JSON.stringify(next)) return;
+				await writeJsonAtomically(this.directory, "index.json", next, this.logger);
+				this.index = next;
+			} finally {
+				this.logger.info("会话摘要和固定顺序刷新结束");
+			}
 		});
 	}
 
@@ -190,7 +213,7 @@ export class WorkspaceStore {
 				};
 				const sessions = previous
 					? current.sessions.map((item) => (item === previous ? saved : item))
-					: [...current.sessions, saved];
+					: [saved, ...current.sessions];
 				const activeRef = active ? { cwd, id: session.id } : current.active;
 				const next: Index = {
 					...current,

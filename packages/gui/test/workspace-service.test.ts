@@ -6,6 +6,7 @@ import { type ManagedHost, WorkspaceService } from "../src/main/workspace-servic
 import { WorkspaceStore } from "../src/main/workspace-store.ts";
 import type { SessionSnapshot } from "../src/shared/protocol.ts";
 import type { SessionSummary } from "../src/shared/workspace.ts";
+import { projectSummarySchema } from "../src/shared/workspace.ts";
 import { FakeAgentPort, snapshot } from "./fixtures.ts";
 import { pngFixture } from "./image-fixture.ts";
 
@@ -738,12 +739,180 @@ describe("WorkspaceService", () => {
 		await workspace.attach(firstDirectory);
 		await workspace.attach(secondDirectory);
 		const projects = await workspace.getProjects();
-		expect(projects.map((project) => project.cwd)).toEqual([secondCwd, firstCwd]);
-		expect(projects[1]?.sessions.map((session) => session.id)).toEqual(["first"]);
+		expect(projects.map((project) => project.cwd)).toEqual([firstCwd, secondCwd]);
+		expect(projects[0]?.sessions.map((session) => session.id)).toEqual(["first"]);
 		await workspace.openSession("first");
 		expect((await workspace.getSnapshot())?.cwd).toBe(firstCwd);
 		expect((await workspace.getSnapshot())?.sessionId).toBe("first");
+		expect((await workspace.getProjects()).map((project) => project.cwd)).toEqual([firstCwd, secondCwd]);
 		await workspace.close();
+	});
+
+	it("keeps library and project session positions while switching or refreshing newer summaries", async () => {
+		logger.info("开始验证导航不重排会话");
+		const directory = await mkdtemp(join(tmpdir(), "pi-gui-workspace-"));
+		directories.push(directory);
+		const cwd = await realpath(directory);
+		const entries: SessionSummary[] = [
+			{ id: "first", title: "第一项", preview: "", messageCount: 1, updatedAt: 3, persisted: true },
+			{ id: "second", title: "第二项", preview: "", messageCount: 1, updatedAt: 2, persisted: true },
+		];
+		const store = new WorkspaceStore(join(directory, "state"), logger);
+		const workspace = new WorkspaceService(
+			store,
+			(path, target) => {
+				const host = new Host(path, target.type === "session" ? target.id : "first");
+				vi.spyOn(host, "listSessions").mockImplementation(async () => [...entries]);
+				return host;
+			},
+			logger,
+		);
+		try {
+			// 1.1 选中较旧会话，即使 SDK 修改它的时间并把它移到前面，导航顺序仍相同。
+			await workspace.attach(cwd);
+			await workspace.openSession("second");
+			entries[1] = { ...entries[1], updatedAt: 100 };
+			entries.reverse();
+			expect((await workspace.getLibrary())?.sessions.map((item) => item.id)).toEqual(["first", "second"]);
+			expect((await workspace.getProjects())[0].sessions.map((item) => item.id)).toEqual(["first", "second"]);
+			await workspace.openSession("first");
+			expect((await workspace.getLibrary())?.sessions.map((item) => item.id)).toEqual(["first", "second"]);
+			// 1.2 用户显式置顶仍生效，不把固定顺序误解为禁用组织操作。
+			await workspace.updateSession({ sessionId: "second", pinned: true });
+			expect((await workspace.getLibrary())?.sessions.map((item) => item.id)).toEqual(["second", "first"]);
+		} finally {
+			await workspace.close();
+			logger.info("导航不重排会话验证结束");
+		}
+	});
+
+	/*
+	 * ========================================================================
+	 * 步骤2：验证各工作区共用完整会话摘要
+	 * ========================================================================
+	 * 数据源：超过旧列表上限的宿主摘要和实际项目契约。
+	 * 操作：1) 不因当前工作区不同而截断；2) 切换前后数量和顺序一致。
+	 */
+	it("returns the same complete project list before and after changing workspaces", async () => {
+		logger.info("开始验证完整工作区会话摘要");
+		const directory = await mkdtemp(join(tmpdir(), "pi-gui-workspace-"));
+		directories.push(directory);
+		const secondDirectory = join(directory, "second");
+		await mkdir(secondDirectory);
+		const cwd = await realpath(directory);
+		const secondCwd = await realpath(secondDirectory);
+		const entries: SessionSummary[] = Array.from({ length: 125 }, (_, index) => ({
+			id: `session-${index}`,
+			title: `会话 ${index}`,
+			preview: "",
+			messageCount: 1,
+			updatedAt: 125 - index,
+			persisted: true,
+		}));
+		const first = new Host(cwd, entries[0].id);
+		vi.spyOn(first, "listSessions").mockResolvedValue(entries);
+		const workspace = new WorkspaceService(
+			new WorkspaceStore(join(directory, "state"), logger),
+			vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(new Host(secondCwd, "other")),
+			logger,
+		);
+		try {
+			// 2.1 数量同时超过旧服务截断和旧契约上限，完整列表能传到界面。
+			await workspace.attach(cwd);
+			const library = await workspace.getLibrary();
+			const before = (await workspace.getProjects())[0];
+			expect(before.sessions).toHaveLength(125);
+			expect(projectSummarySchema.parse(before).sessions).toEqual(library?.sessions);
+			// 2.2 切到其他项目再返回，原项目摘要不随选中状态变化。
+			await workspace.attach(secondCwd);
+			expect((await workspace.getProjects())[0]).toEqual(before);
+			await workspace.openSessionAt(cwd, entries[0].id);
+			expect((await workspace.getProjects())[0]).toEqual(before);
+		} finally {
+			await workspace.close();
+			logger.info("完整工作区会话摘要验证结束");
+		}
+	});
+
+	/*
+	 * ========================================================================
+	 * 步骤3：验证跨工作区会话操作不依赖当前选择
+	 * ========================================================================
+	 * 数据源：保留的不同工作区宿主、离线历史与桌面索引。
+	 * 操作：1) 当前任务运行时操作其他会话；2) 未打开历史按可信目录重命名。
+	 */
+	it("renames pins and archives another workspace session without changing the active task", async () => {
+		logger.info("开始验证其他工作区会话操作");
+		const directory = await mkdtemp(join(tmpdir(), "pi-gui-workspace-"));
+		directories.push(directory);
+		const otherDirectory = join(directory, "other");
+		await mkdir(otherDirectory);
+		const cwd = await realpath(directory);
+		const otherCwd = await realpath(otherDirectory);
+		const first = new Host(cwd, "first");
+		const active = new Host(otherCwd, "active");
+		const rename = vi.spyOn(first, "renameSession");
+		const factory = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(active);
+		const store = new WorkspaceStore(join(directory, "state"), logger);
+		const workspace = new WorkspaceService(store, factory, logger);
+		try {
+			await workspace.attach(cwd);
+			await workspace.attach(otherCwd);
+			active.current.run.phase = "working";
+			// 3.1 当前任务无需停止，目标名称和偏好写入自己的工作区。
+			await workspace.updateSession({ sessionId: "first", title: "其他工作区新名称" });
+			await workspace.updateSession({ sessionId: "first", pinned: true, archived: true });
+			expect(rename).toHaveBeenCalledWith("first", "其他工作区新名称", cwd);
+			expect((await store.sessions(cwd))[0]).toMatchObject({ title: "其他工作区新名称", pinned: true, archived: true });
+			expect((await workspace.getSnapshot())?.sessionId).toBe("active");
+			expect(active.current.run.phase).toBe("working");
+			expect(factory).toHaveBeenCalledTimes(2);
+			// 3.2 运行中会话仍可改置顶归档；改名称只检查目标任务。
+			first.current.run.phase = "working";
+			await workspace.updateSession({ sessionId: "first", pinned: false, archived: false });
+			await expect(workspace.updateSession({ sessionId: "first", title: "不应覆盖" })).rejects.toThrow("该会话任务");
+			expect((await store.sessions(cwd))[0]).toMatchObject({
+				title: "其他工作区新名称",
+				pinned: false,
+				archived: false,
+			});
+			await expect(workspace.updateSession({ sessionId: "missing", pinned: true })).rejects.toThrow("工作区列表");
+		} finally {
+			await workspace.close();
+			logger.info("其他工作区会话操作验证结束");
+		}
+	});
+
+	it("routes unopened saved history names by the indexed workspace without creating or selecting a host", async () => {
+		logger.info("开始验证未打开历史重命名路由");
+		const directory = await mkdtemp(join(tmpdir(), "pi-gui-workspace-"));
+		directories.push(directory);
+		const cwd = await realpath(directory);
+		const host = new Host(cwd, "active");
+		const factory = vi.fn(() => host);
+		const store = new WorkspaceStore(join(directory, "state"), logger);
+		const workspace = new WorkspaceService(store, factory, logger);
+		const rename = vi.spyOn(host, "renameSession").mockResolvedValue();
+		const historyCwd = join(cwd, "saved-workspace");
+		try {
+			await workspace.attach(cwd);
+			await store.rememberSessions(historyCwd, [
+				{ id: "history", title: "历史", preview: "", updatedAt: 1, messageCount: 1, persisted: true },
+				{ id: "unsent", title: "草稿", preview: "", updatedAt: 1, messageCount: 0, persisted: false },
+			]);
+			host.current.run.phase = "working";
+			// 3.3 历史写入明确携带索引目录，不借当前会话身份或重建模型宿主。
+			await workspace.updateSession({ sessionId: "history", title: "保存后的名称" });
+			expect(rename).toHaveBeenCalledWith("history", "保存后的名称", historyCwd);
+			await workspace.updateSession({ sessionId: "unsent", title: "未落盘新名称" });
+			expect(rename).toHaveBeenCalledTimes(1);
+			expect((await store.sessions(historyCwd)).map((entry) => entry.title)).toEqual(["保存后的名称", "未落盘新名称"]);
+			expect((await workspace.getSnapshot())?.sessionId).toBe("active");
+			expect(factory).toHaveBeenCalledTimes(1);
+		} finally {
+			await workspace.close();
+			logger.info("未打开历史重命名路由验证结束");
+		}
 	});
 
 	it("renames and removes a workspace and creates a session in another", async () => {

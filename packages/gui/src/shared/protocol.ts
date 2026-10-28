@@ -236,6 +236,7 @@ export const hostRequestSchema = z.discriminatedUnion("type", [
 	z.object({
 		type: z.literal("renameSession"),
 		id: identifier,
+		cwd: z.string().min(1).max(4096),
 		sessionId: sessionIdSchema,
 		title: sessionTitleSchema,
 	}),

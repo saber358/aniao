@@ -21,7 +21,6 @@ import type {
 	ProjectSummary,
 	SessionChange,
 	SessionIdentity,
-	SessionItem,
 	SessionLibrary,
 	SessionRuntime,
 	SessionSummary,
@@ -40,7 +39,7 @@ export interface ManagedHost extends AgentPort {
 	getForkDraft(): Promise<string | undefined>;
 	getImage(imageId: string): Promise<string>;
 	prepareTransition(target: SessionTarget): Promise<void>;
-	renameSession(sessionId: string, title: string): Promise<void>;
+	renameSession(sessionId: string, title: string, cwd: string): Promise<void>;
 	listPlugins?(): Promise<PluginPackage[]>;
 	installPlugin?(source: string): Promise<PluginPackage[]>;
 	removePlugin?(source: string, scope: PluginScope): Promise<PluginPackage[]>;
@@ -69,7 +68,7 @@ interface HostedSession {
  * 数据源：SDK 宿主、桌面索引和用户已选择的项目。
  * 操作：
  *   1) 切换互斥，初始化失败时保留当前宿主
- *   2) 会话 ID 在当前项目中查证，Renderer 不提交文件路径
+ *   2) 会话 ID 在已登记工作区中查证，Renderer 不提交文件路径
  */
 export class WorkspaceService {
 	private readonly store: WorkspaceStore;
@@ -456,44 +455,24 @@ export class WorkspaceService {
 		const host = this.host;
 		const snapshot = await host.getSnapshot();
 		const entries = await host.listSessions();
-		const saved = await this.store.sessions(snapshot.cwd);
-		// 1.2 已落盘会话以 SDK 为准；尚未发送的空会话由桌面索引保留身份。
-		const result = new Map<string, SessionItem>(saved.filter((item) => !item.persisted).map((item) => [item.id, item]));
-		for (const entry of entries) {
-			const preferences = saved.find((item) => item.id === entry.id);
-			result.set(entry.id, {
-				...entry,
-				pinned: preferences?.pinned ?? false,
-				archived: preferences?.archived ?? false,
-			});
-		}
-		const active = result.get(snapshot.sessionId);
-		if (active && host === this.host) await this.store.remember(snapshot.cwd, active);
+		// 1.2 摘要刷新保留索引顺序；打开、恢复和修改时间变化都不置顶。
+		await this.store.rememberSessions(snapshot.cwd, entries);
+		const sessions = await this.store.sessions(snapshot.cwd);
 		return {
 			cwd: snapshot.cwd,
-			sessions: [...result.values()].sort(
-				(a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt || a.id.localeCompare(b.id),
-			),
+			sessions: sessions.sort((a, b) => Number(b.pinned) - Number(a.pinned)),
 		};
 	}
 
 	async getProjects(): Promise<ProjectSummary[]> {
 		const cwds = await this.store.projects();
-		const active = await this.store.active();
 		const projects: ProjectSummary[] = [];
 		for (const cwd of cwds) {
 			const sessions = await this.store.sessions(cwd);
-			sessions.sort(
-				(a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt || a.id.localeCompare(b.id),
-			);
+			sessions.sort((a, b) => Number(b.pinned) - Number(a.pinned));
 			const savedName = await this.store.projectName(cwd);
-			projects.push({ cwd, name: savedName ?? (basename(cwd) || cwd), sessions: sessions.slice(0, 20) });
+			projects.push({ cwd, name: savedName ?? (basename(cwd) || cwd), sessions });
 		}
-		projects.sort((a, b) => {
-			const activeOrder = Number(b.cwd === active?.cwd) - Number(a.cwd === active?.cwd);
-			if (activeOrder !== 0) return activeOrder;
-			return (b.sessions[0]?.updatedAt ?? 0) - (a.sessions[0]?.updatedAt ?? 0) || a.cwd.localeCompare(b.cwd);
-		});
 		return projects;
 	}
 
@@ -642,24 +621,34 @@ export class WorkspaceService {
 		}
 	}
 
+	/*
+	 * ========================================================================
+	 * 步骤9：按目标会话归属更新各工作区组织信息
+	 * ========================================================================
+	 * 数据源：已登记会话与对应宿主，不信任界面传入的磁盘路径。
+	 * 操作：1) 重命名路由到目标宿主或已保存历史；2) 置顶归档只更新索引。
+	 */
 	async updateSession(change: SessionChange): Promise<void> {
-		if (this.changing || this.pendingCommands > 0) throw new Error("请等待当前操作结束");
+		if (this.closed || this.changing) throw new Error("请等待当前操作结束");
 		this.changing = true;
 		this.logger.info("开始更新会话组织");
 		try {
-			const library = await this.getLibrary();
-			const entry = library?.sessions.find((item) => item.id === change.sessionId);
-			if (!library || !entry || !this.host) throw new Error("会话已不在当前项目中");
+			// 9.1 目标目录取自桌面索引，操作其他工作区不切换当前会话。
+			const entry = await this.store.findSession(change.sessionId);
+			if (!entry) throw new Error("会话已不在工作区列表中");
 			const retained = [...this.hosts.values()].find(
-				(item) =>
-					item.runtime.sessionId === change.sessionId && item.runtime.cwd === library.cwd && !item.host.isClosed,
+				(item) => item.runtime.sessionId === change.sessionId && item.runtime.cwd === entry.cwd && !item.host.isClosed,
 			);
-			const owner = retained?.host ?? this.host;
-			if ((await owner.getSnapshot()).run.phase !== "idle") throw new Error("请等待该会话任务结束");
-			await this.store.remember(library.cwd, entry);
-			if (change.title && (entry.persisted || (await this.host.getSnapshot()).sessionId === entry.id))
-				await owner.renameSession(entry.id, change.title);
-			await this.store.update(library.cwd, change);
+			// 9.2 只有目标会话重命名需要等待任务；其他会话运行不影响组织操作。
+			if (change.title && retained && (retained.pending || (await retained.host.getSnapshot()).run.phase !== "idle"))
+				throw new Error("请等待该会话任务结束后重命名");
+			if (change.title && (entry.persisted || retained)) {
+				const owner = retained?.host ?? [...this.hosts.keys()].find((host) => !host.isClosed);
+				if (!owner) throw new Error("请先连接项目");
+				await owner.renameSession(entry.id, change.title, entry.cwd);
+			}
+			// 9.3 未落盘且未打开的空会话只改索引，下次打开时恢复名称。
+			await this.store.update(entry.cwd, change);
 		} finally {
 			this.changing = false;
 			this.logger.info("会话组织更新结束");

@@ -70,9 +70,18 @@ const sidePanelOpen = ref(false);
 const viewMode = ref<"app" | "plugins" | "automation">("app");
 const splitterItems = computed(() => [
 	...(sidebarOpen.value
-		? [{ slot: "sidebar", sizeUnit: "px" as const, defaultSize: 280, minSize: 240, maxSize: 380 }]
+		? [
+				{
+					id: "workspace-sidebar",
+					slot: "sidebar",
+					sizeUnit: "px" as const,
+					defaultSize: 280,
+					minSize: 240,
+					maxSize: 380,
+				},
+			]
 		: []),
-	{ slot: "main", sizeUnit: "px" as const, minSize: 600 },
+	{ id: "workspace-main", slot: "main", sizeUnit: "px" as const, minSize: 600 },
 ]);
 const saving = ref(false);
 const planMode = ref(false);
@@ -629,20 +638,15 @@ onBeforeUnmount(() => {
 					</div>
 				</div>
 			</header>
-			<USplitter
-				v-show="!settingsOpen"
-				:key="sidebarOpen ? 'sidebar-open' : 'sidebar-closed'"
-				:items="splitterItems"
-				class="workspace-splitter"
-			>
+			<USplitter v-show="!settingsOpen" :items="splitterItems" class="workspace-splitter">
 				<template #sidebar>
 					<SessionSidebar
-						:sessions="library?.sessions ?? []"
 						:projects="projects"
 						:active-id="snapshot?.sessionId"
 						:runtimes="sessionRuntimes"
 						:cwd="snapshot?.cwd"
-						:disabled="changing || state.selectingFiles"
+						:disabled="state.selectingFiles"
+						:navigating="changing"
 						:connected="state.connection === 'connected'"
 						:resources-disabled="!snapshot || state.connection !== 'connected'"
 						:automation-disabled="!snapshot || state.connection !== 'connected'"
@@ -707,17 +711,6 @@ onBeforeUnmount(() => {
 									<header class="conversation-header">
 										<h1 class="conversation-title">{{ snapshot ? snapshot.title : "新会话" }}</h1>
 										<div class="conversation-tools">
-											<UButton
-												icon="i-lucide-git-branch"
-												color="neutral"
-												variant="ghost"
-												size="sm"
-												aria-label="打开变更"
-												title="变更"
-												:disabled="!snapshot || changing"
-												@click="openSideTool('changes')"
-												>变更</UButton
-											>
 											<UButton
 												icon="i-lucide-panel-right"
 												color="neutral"

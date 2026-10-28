@@ -90,8 +90,9 @@ export class SessionControllers {
 					);
 					this.controllers.set(key, controller);
 				}
-				this.select(controller);
 				await controller.connect();
+				// 1.5 目标快照和草稿就绪后再发布，避免先把侧栏切到空状态。
+				if (!this.closed) this.select(controller);
 			})
 			.catch(async () => {
 				// 1.4 当前宿主故障时由其 Controller 发布断连状态，不影响其他会话。

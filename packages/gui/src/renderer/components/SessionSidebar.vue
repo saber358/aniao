@@ -6,11 +6,11 @@ import { UIcon, UButton, UDropdownMenu, UInput, UModal } from "../ui.ts";
 import SidebarHeader from "./SidebarHeader.vue";
 
 const props = defineProps<{
-	sessions: SessionItem[];
 	projects: ProjectSummary[];
 	activeId?: string;
 	runtimes: SessionRuntime[];
 	disabled: boolean;
+	navigating: boolean;
 	connected: boolean;
 	resourcesDisabled: boolean;
 	automationDisabled: boolean;
@@ -38,7 +38,7 @@ const runtimeById = computed(() => new Map(props.runtimes.map((runtime) => [runt
 const query = ref("");
 const searchOpen = ref(false);
 const archived = ref(false);
-const limit = ref(50);
+const limits = ref<Record<string, number>>({});
 const renaming = ref<SessionItem | null>(null);
 const title = ref("");
 const saving = ref(false);
@@ -69,12 +69,15 @@ const workspaceMenu = computed(() => [
 		onSelect: () => emit("refresh"),
 	},
 ]);
-const filtered = computed(() =>
-	props.sessions.filter(
-		(item) =>
-			item.archived === archived.value &&
-			`${item.title}\n${item.preview}`.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase()),
-	),
+const listedProjects = computed(() =>
+	visibleProjects.value.map((project) => ({
+		...project,
+		sessions: project.sessions.filter(
+			(item) =>
+				item.archived === archived.value &&
+				`${item.title}\n${item.preview}`.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase()),
+		),
+	})),
 );
 function relativeTime(updatedAt: number): string {
 	const minutes = Math.max(0, Math.floor((Date.now() - updatedAt) / 60_000));
@@ -87,7 +90,7 @@ function relativeTime(updatedAt: number): string {
 	return new Date(updatedAt).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" });
 }
 watch([query, archived], () => {
-	limit.value = 50;
+	limits.value = {};
 });
 
 function isExpanded(cwd: string): boolean {
@@ -159,7 +162,7 @@ async function confirmRemoveProject(): Promise<void> {
 
 /*
  * ========================================================================
- * 步骤1：组织当前项目会话列表
+ * 步骤1：组织各工作区会话列表
  * ========================================================================
  * 数据源：主进程返回的摘要与偏好。
  * 操作：
@@ -202,7 +205,7 @@ async function rename() {
 </script>
 
 <template>
-	<aside class="sidebar">
+	<aside class="sidebar" :aria-busy="navigating">
 		<SidebarHeader
 			:disabled="!activeId || disabled"
 			:resources-disabled="resourcesDisabled"
@@ -252,8 +255,8 @@ async function rename() {
 		<UInput
 			v-if="searchOpen && activeId"
 			v-model="query"
-			aria-label="搜索当前工作区会话"
-			placeholder="搜索当前工作区会话"
+			aria-label="搜索会话内容"
+			placeholder="搜索会话"
 			icon="i-lucide-search"
 			size="sm"
 			variant="soft"
@@ -261,8 +264,8 @@ async function rename() {
 			autofocus
 		/>
 		<div class="workspace-tree">
-			<div v-for="project in visibleProjects" :key="project.cwd" class="workspace-node">
-				<div class="project-row" :class="{ current: project.cwd === cwd }">
+			<div v-for="project in listedProjects" :key="project.cwd" class="workspace-node" :data-workspace="project.cwd">
+				<div class="project-row">
 					<button
 						type="button"
 						class="project-toggle"
@@ -271,7 +274,7 @@ async function rename() {
 						@click="toggleExpanded(project.cwd)"
 					>
 						<UIcon
-							:name="project.cwd === cwd ? 'i-lucide-folder-open' : 'i-lucide-folder'"
+							:name="isExpanded(project.cwd) ? 'i-lucide-folder-open' : 'i-lucide-folder'"
 							class="project-icon project-folder"
 						/>
 						<UIcon
@@ -312,11 +315,12 @@ async function rename() {
 						/>
 					</div>
 				</div>
-				<div v-if="isExpanded(project.cwd) && project.cwd === cwd && activeId" class="project-sessions">
-					<nav class="session-list" aria-label="历史会话">
+				<div v-if="isExpanded(project.cwd)" class="project-sessions">
+					<nav class="session-list" :aria-label="`历史会话：${project.name}`">
 						<div
-							v-for="session in filtered.slice(0, limit)"
+							v-for="session in project.sessions.slice(0, limits[project.cwd] ?? 50)"
 							:key="session.id"
+							:data-session="session.id"
 							:class="[
 								'session-row',
 								{ active: session.id === activeId, running: runtimeById.get(session.id)?.running },
@@ -329,7 +333,11 @@ async function rename() {
 								:aria-busy="runtimeById.get(session.id)?.running ?? false"
 								:disabled="disabled"
 								:title="session.preview || session.title"
-								@click="emit('select', session.id)"
+								@click="
+									project.cwd === cwd
+										? emit('select', session.id)
+										: emit('selectAt', { cwd: project.cwd, sessionId: session.id })
+								"
 							>
 								<span
 									v-if="runtimeById.get(session.id)?.running"
@@ -355,43 +363,18 @@ async function rename() {
 									:disabled="disabled || !connected"
 							/></UDropdownMenu>
 						</div>
-						<p v-if="!filtered.length" class="sidebar-hint">
+						<p v-if="!project.sessions.length" class="sidebar-hint">
 							{{ query ? "没有匹配的会话" : archived ? "没有已归档会话" : "没有会话" }}
 						</p>
-						<UButton v-if="filtered.length > limit" color="neutral" variant="ghost" size="xs" @click="limit += 50"
+						<UButton
+							v-if="project.sessions.length > (limits[project.cwd] ?? 50)"
+							color="neutral"
+							variant="ghost"
+							size="xs"
+							@click="limits[project.cwd] = (limits[project.cwd] ?? 50) + 50"
 							>显示更多</UButton
 						>
 					</nav>
-				</div>
-				<div v-else-if="isExpanded(project.cwd) && project.sessions.length" class="project-sessions">
-					<button
-						v-for="session in project.sessions.slice(0, 3)"
-						:key="session.id"
-						type="button"
-						class="tree-session"
-						:title="session.preview || session.title"
-						:disabled="disabled"
-						@click="emit('selectAt', { cwd: project.cwd, sessionId: session.id })"
-					>
-						<span
-							v-if="runtimeById.get(session.id)?.running"
-							class="session-running-spinner"
-							role="status"
-							aria-label="正在运行"
-						></span>
-						<span class="session-name">{{ runtimeById.get(session.id)?.title || session.title }}</span>
-						<span v-if="runtimeById.get(session.id)?.connected === false" class="session-attention">已断开</span>
-						<span class="session-time">{{ relativeTime(session.updatedAt) }}</span>
-					</button>
-					<button
-						v-if="project.sessions.length > 3"
-						type="button"
-						class="tree-more"
-						:disabled="disabled"
-						@click="emit('openWorkspace', project.cwd)"
-					>
-						查看全部 {{ project.sessions.length }} 个会话
-					</button>
 				</div>
 			</div>
 			<p v-if="!visibleProjects.length" class="sidebar-hint">打开一个项目，开始工作。</p>
@@ -467,9 +450,5 @@ async function rename() {
 	flex: none;
 	color: var(--accent);
 	font-size: 10px;
-}
-.tree-session .session-running-spinner {
-	position: static;
-	margin: 0;
 }
 </style>

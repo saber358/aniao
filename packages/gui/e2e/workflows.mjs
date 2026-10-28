@@ -289,7 +289,8 @@ try {
 	assert.equal(await readFile(join(project, "README.md"), "utf8"), "later edit 中文\n");
 	results.push("stale diff rejected; later edit retained");
 	// 2.2 用工作树界面创建和打开，不预先登记新目录。
-	await page.getByRole("button", { name: "打开变更", exact: true }).click();
+	await page.getByRole("button", { name: "展开右侧面板", exact: true }).click();
+	await page.locator(".side-tool").filter({ hasText: "变更" }).click();
 	await page.getByRole("button", { name: "工作树", exact: true }).click();
 	await page.getByPlaceholder("feature/my-change").fill("codex/workflow-review");
 	await page.getByRole("button", { name: "创建工作树", exact: true }).click();

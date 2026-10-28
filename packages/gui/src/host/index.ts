@@ -58,7 +58,7 @@ async function startHost(): Promise<void> {
 				post({ type: "image", id: request.id, url: host.adapter.getImage(request.imageId) });
 			else if (request.type === "history") post({ type: "history", id: request.id, value: await library.list() });
 			else if (request.type === "renameSession") {
-				await library.rename(request.sessionId, request.title);
+				await library.rename(request.sessionId, request.title, request.cwd);
 				post({ type: "result", id: request.id });
 			} else if (request.type === "command") {
 				await host.dispatch(request.value);

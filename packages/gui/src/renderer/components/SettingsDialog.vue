@@ -1373,15 +1373,14 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 .settings-content {
 	min-width: 0;
 	overflow-y: auto;
-	padding: 34px clamp(28px, 8vw, 150px);
+	scrollbar-gutter: stable both-edges;
+	padding: 34px clamp(28px, 4vw, 64px);
 }
 .settings-section {
 	display: grid;
 	gap: 14px;
-	max-width: 760px;
-}
-.settings-section.models-section {
-	max-width: none;
+	width: min(100%, 1100px);
+	margin-inline: auto;
 }
 .settings-section h3 {
 	margin: 0 0 2px;
