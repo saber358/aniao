@@ -73,6 +73,7 @@ import { SessionDataClient } from "./session-data-client.ts";
 import { StartupWindow } from "./startup-window.ts";
 import { UpdateService } from "./update-service.ts";
 import { UtilityHostClient } from "./utility-host-client.ts";
+import { WindowTray } from "./window-tray.ts";
 import { WorkspaceService } from "./workspace-service.ts";
 import { WorkspaceStore } from "./workspace-store.ts";
 import { WorktreeService } from "./worktree-service.ts";
@@ -109,7 +110,7 @@ export async function startApplication(): Promise<void> {
 	logger.info("开始准备启动窗口生命周期");
 	const startup = new StartupWindow(directory, logger, () => app.quit());
 	const cleanup: Array<() => void | Promise<void>> = [() => startup.dispose()];
-	let mainWindow: BrowserWindow | undefined;
+	let tray: WindowTray | undefined;
 	let quitting = false;
 	let shutdownPromise: Promise<void> | undefined;
 	const shutdown = (): Promise<void> => {
@@ -129,13 +130,13 @@ export async function startApplication(): Promise<void> {
 	app.on("window-all-closed", () => {
 		if (!quitting) app.quit();
 	});
-	app.on("second-instance", () => {
+	const showApplication = () => {
 		if (quitting) return;
-		if (startup.focus() || !mainWindow || mainWindow.isDestroyed()) return;
-		if (mainWindow.isMinimized()) mainWindow.restore();
-		mainWindow.show();
-		mainWindow.focus();
-	});
+		// 4.2 启动期间聚焦启动页，就绪后复用托盘保留的原窗口。
+		if (!startup.focus()) tray?.restore();
+	};
+	app.on("second-instance", showApplication);
+	app.on("activate", showApplication);
 	await startup.open();
 	logger.info("启动窗口生命周期准备结束");
 	if (quitting) return;
@@ -259,8 +260,8 @@ export async function startApplication(): Promise<void> {
 			backgroundThrottling: false,
 		},
 	});
-	mainWindow = window;
 	startup.connect(window);
+	window.once("session-end", () => void shutdown());
 	window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 	window.webContents.on("will-navigate", (event) => {
 		event.preventDefault();
@@ -789,7 +790,7 @@ export async function startApplication(): Promise<void> {
 	}
 	if (quitting) return;
 	try {
-		// 4.2 前台保留启动页，真实初始快照与首屏绘制完成后再显示工作台。
+		// 4.3 前台保留启动页，真实初始快照与首屏绘制完成后再显示工作台。
 		if (process.env.ELECTRON_RENDERER_URL) await window.loadURL(process.env.ELECTRON_RENDERER_URL);
 		else await window.loadFile(join(directory, "../renderer/index.html"));
 		await startup.reveal();
@@ -798,6 +799,15 @@ export async function startApplication(): Promise<void> {
 		throw error;
 	}
 	if (quitting) return;
+	// 4.4 首屏就绪后才开放托盘，统一退出仍先保存所有会话。
+	const windowTray = new WindowTray(
+		window,
+		logger,
+		() => quitting,
+		() => app.quit(),
+	);
+	tray = windowTray;
+	cleanup.push(() => windowTray.dispose());
 	if (startupError)
 		void dialog.showMessageBox(window, { type: "warning", title: "工作区恢复失败", message: startupError });
 	schedule.start();

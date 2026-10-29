@@ -297,7 +297,7 @@ try {
 	checks.push("builtin-switch-takes-effect-without-model-replay");
 	await page.getByRole("button", { name: "设置", exact: true }).click();
 	await page.getByRole("button", { name: "MCP 服务器", exact: true }).click();
-	await page.getByText("内置 · 免费", { exact: true }).first().waitFor();
+	await page.getByText("内置", { exact: true }).first().waitFor();
 	await page.evaluate(() =>
 		window.piDesktop.saveMcpServer({
 			name: "broken",

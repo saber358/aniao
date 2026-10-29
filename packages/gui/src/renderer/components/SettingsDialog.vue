@@ -960,9 +960,6 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 
 				<section v-else-if="active === 'mcp'" class="settings-section models-section">
 					<h3>MCP 服务器</h3>
-					<p class="settings-muted">
-						四项内置能力均免费、免密钥。搜索与 GitHub 公开接口可能限流，不会切换到收费服务。
-					</p>
 					<UButton
 						class="settings-inline-button"
 						color="neutral"
@@ -979,7 +976,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 							<div class="provider-main">
 								<strong
 									>{{ server.title ?? server.name
-									}}<small v-if="server.type === 'builtin'" class="mcp-builtin">内置 · 免费</small></strong
+									}}<small v-if="server.type === 'builtin'" class="mcp-builtin">内置</small></strong
 								>
 								<span
 									class="provider-state"
@@ -988,7 +985,7 @@ watch([customId, customBaseUrl, customModels, customKey], () => {
 									<i class="provider-dot" aria-hidden="true" />
 									{{ mcpStatus(server) }}
 								</span>
-								<span class="mcp-command">
+								<span v-if="server.type !== 'builtin'" class="mcp-command">
 									{{
 										server.type === "stdio"
 											? [server.command, ...(server.args ?? [])].filter(Boolean).join(" ")

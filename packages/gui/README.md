@@ -14,7 +14,7 @@
 
 本包承载 Aniao Harness 桌面界面。Agent 循环、模型接入、工具执行和会话持久化复用现有 Pi 包。
 
-当前桌面分发版本为 `0.80.26`，内核为官方 Pi `1.4.0`。本版内置免费免密钥 MCP，支持模型操控右栏浏览器、按会话保留网页状态，并修复 MCP 多会话同步、连接状态和含空格参数；提供 Windows x64 与 Linux amd64 `.deb`。发布产物与验收报告保存在 `artifacts/publish-0.80.26-20261028/`。`pi-ai`、`pi-agent-core`、`pi-coding-agent` 与 `pi-tui` 均固定为该内核版本，开发、测试和打包共用同一套发布包；仓库中的 `0.80.6` Pi 源码不再作为桌面入口。课程包 `packages/pi-course` 已按用户要求移除。
+当前桌面分发版本为 `0.80.27`，内核为官方 Pi `1.4.0`。本版支持关闭到系统托盘，恢复原窗口时保留会话、网页、终端和草稿，并精简 MCP 设置说明；提供 Windows x64 与 Linux amd64 `.deb`。发布产物与验收报告保存在 `artifacts/publish-0.80.27-20261029/`。`pi-ai`、`pi-agent-core`、`pi-coding-agent` 与 `pi-tui` 均固定为该内核版本，开发、测试和打包共用同一套发布包；仓库中的 `0.80.6` Pi 源码不再作为桌面入口。课程包 `packages/pi-course` 已按用户要求移除。
 
 侧栏顶部提供品牌、“新会话”主按钮，以及已接通的插件和自动化任务入口。插件页展示当前资源，自动化页管理定时任务与后台任务。工作区按索引保存的顺序展示，打开会话不会把项目或会话移到前面；摘要刷新与重启保持原位置，新建会话放在前面，显式置顶仍有效。所有工作区使用相同的会话行，只有会话显示选中背景，工作区不显示选中背景；字号、字重、行高、缩进、图标和菜单占位保持一致。各工作区统一每批展示 50 个会话，不再显示“查看全部 X 个会话”，展开更多后切换会话不收回列表。显示名称统一为 Aniao Harness，包名、Pi 配置与数据目录沿用原标识。
 
@@ -143,7 +143,7 @@ Linux 包声明 `glibc >= 2.34` 与 GTK/NSS/音频等运行依赖，由 apt 检�
 
 安装包启用 asar，宿主入口和原生模块放在 asar 外；SDK 的主题与资源复制到 `resources/sdk`，主进程在 packaged 模式下把 `PI_PACKAGE_DIR` 指向该目录。Debian 系安装命令为 `sudo apt install ./Aniao-Harness-<版本>-linux-amd64.deb`。桌面快捷方式与命令 `aniao-harness` 均可启动。
 
-桌面分发版本由 `electron-builder.yml` 的 `extraMetadata.version` 指定，当前为 `0.80.26`；不改动共享 SDK 包版本。发布新桌面版本时须递增该值，客户端比较的是安装包中的应用版本。可用 `--config.directories.output=<目录>` 保留此前产物。
+桌面分发版本由 `electron-builder.yml` 的 `extraMetadata.version` 指定，当前为 `0.80.27`；不改动共享 SDK 包版本。发布新桌面版本时须递增该值，客户端比较的是安装包中的应用版本。可用 `--config.directories.output=<目录>` 保留此前产物。
 
 默认 Provider 通过构建时环境变量注入：
 

@@ -4,6 +4,8 @@
 
 ### Added
 
+- Added close-to-tray behavior that keeps sessions and background tasks running, with tray open/quit actions, second-launch restoration and normal cleanup on quit or update installation.
+
 - Added four free, keyless built-in MCP servers for the visible side browser, public web reading/search, documentation search/read and read-only public GitHub access, with native-page snapshots, form actions, screenshots and per-session tabs. See [built-in MCP](docs/builtin-mcp.md).
 
 - Added settings usage statistics from real local SDK history, with token totals, session peak, chat duration, activity streaks, a yearly heatmap, selectable daily trends and model breakdowns; scans run in an isolated read-only process without model calls.
@@ -86,6 +88,8 @@
 - Added a compact blue circular download button immediately left of the sidebar Settings gear, with a white arrow and live progress ring, plus a Help menu that opens a centered version dialog with current/latest versions and explicit check, download, retry, and install actions.
 
 ### Changed
+
+- Simplified MCP settings by removing redundant free-service descriptions while preserving built-in labels, actual connection status, reconnection and enable/disable controls.
 
 - Unified settings content width and increased page, card and body typography; tightened usage charts, date controls and archive groups, with immediate activity tooltips and zero-token models omitted from daily hover details.
 
