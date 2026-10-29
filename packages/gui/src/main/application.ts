@@ -140,12 +140,25 @@ export async function startApplication(): Promise<void> {
 	await startup.open();
 	logger.info("启动窗口生命周期准备结束");
 	if (quitting) return;
+	/*
+	 * ========================================================================
+	 * 步骤8：统一插件独立子进程使用的 SDK 目录
+	 * ========================================================================
+	 * 数据源：与当前宿主同版的官方 SDK 和安装包外置生产依赖。
+	 * 操作：1) 提供普通 Node 能读取的真实目录；2) SDK 模块与资源目录分别传递。
+	 */
+	logger.info("开始准备插件子进程 SDK 目录");
+	// 8.1 普通 Node 不支持 Electron asar，不能把宿主虚拟路径传给后台插件。
+	process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT = app.isPackaged
+		? join(process.resourcesPath, "app.asar.unpacked/node_modules/@earendil-works/pi-coding-agent")
+		: join(directory, "../../node_modules/@earendil-works/pi-coding-agent");
 	// 1.0 开发和安装包均读取同版官方 SDK 资源，不使用仓库旧内核目录。
 	const sdkDirectory =
 		process.env.PI_PACKAGE_DIR ??
 		(app.isPackaged
 			? join(process.resourcesPath, "sdk")
 			: join(directory, "../../node_modules/@earendil-works/pi-coding-agent"));
+	logger.info("插件子进程 SDK 目录准备结束");
 	const defaultsFile =
 		process.env.ANIAO_DEFAULT_PROVIDER_FILE ??
 		(app.isPackaged ? join(process.resourcesPath, "defaults", "provider.json") : "");

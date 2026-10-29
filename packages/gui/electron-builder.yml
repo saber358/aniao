@@ -4,14 +4,13 @@ copyright: Copyright © 2026 Aniao
 
 # 桌面安装器独立记录分发版本，不改动共享 SDK 包的版本。
 extraMetadata:
-   version: 0.80.27
+   version: 0.80.28
 
 releaseInfo:
    releaseNotes: |
-      - 关闭主窗口时收起到系统托盘，会话、终端和后台任务继续运行。
-      - 支持从托盘、再次启动或应用激活恢复原窗口，保留会话和草稿。
-      - 托盘菜单可完整退出；更新安装继续保存会话并清理进程。
-      - 精简 MCP 设置页面，保留内置标记、连接状态和启停控制。
+      - 修复后台子代理启动时报 ENOENT、无法读取安装包依赖的问题。
+      - 为子代理提供同版 SDK 的真实目录，支持后台任务和并行子代理。
+      - 补充真实插件的文件读取、结果回传与右栏详情验收。
 
 directories:
    output: release
@@ -39,9 +38,10 @@ extraResources:
      to: defaults/provider.json
 
 asar: true
-# 宿主以 ESM 运行，原生模块和独立入口放到 asar 外，避免 asar 内解析差异。
+# 插件的独立 Node 子进程不能读取 asar，SDK 与完整生产依赖必须放在真实目录。
 asarUnpack:
    - dist/main/**
+   - node_modules/**
    - "**/*.node"
    - "**/node-pty/**"
 

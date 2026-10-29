@@ -118,6 +118,8 @@
 
 ### Fixed
 
+- Fixed packaged background subagents failing before model startup with `ENOENT` inside `app.asar` by unpacking the full production dependency graph and passing the host SDK's real path through the plugin's supported runtime-root interface; added real-plugin foreground, background and parallel offline execution coverage.
+
 - Synchronize global MCP changes across retained idle hosts and refresh deferred updates before the next task; show actual connection state, tool count and retryable errors, preserve spaced arguments with one-per-line input, and cancel pending desktop tool requests on abort or shutdown.
 
 - Fix reversed sidebar resizing and lost widths after reopening by retaining panel registration and order, keep pixel width stable across window changes, and clamp the right panel to preserve conversation space while native pages yield during left-sidebar drags.
