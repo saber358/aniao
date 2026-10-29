@@ -16,4 +16,4 @@ SessionControllers 为每个 `sessionId + generation` 保存独立 GuiController
 
 点击主窗口关闭按钮或按 Alt+F4 会隐藏到系统托盘，会话、网页、终端和后台任务继续保留。点击或双击托盘图标、选择“打开 Aniao Harness”或再次启动应用会恢复原窗口。托盘菜单“退出”才关闭应用并保存全部会话；重启安装更新仍走退出清理。托盘创建失败时保留原有关闭退出行为，避免窗口隐藏后无法打开。启动动画期间关闭仍会取消启动并退出。
 
-验证入口为 `test/multi-session.test.ts`、`test/workspace-run-status.test.ts`、`test/workspace-service.test.ts` 与 `test/gui-controller.test.ts`。真实 Electron 验收先启动 `node scripts/dev-server.mjs`，再运行 `node e2e/multi-session.mjs`。覆盖初始化弹窗期间无任务标记、打开与重启恢复不发送模型请求、两个任务独立转圈和停止。非默认开发端口使用 `ELECTRON_RENDERER_URL`。验收只调用本机 SSE 模型替身，报告保存在 `artifacts/multi-session-*/results.json`。
+验证入口为 `test/multi-session.test.ts`、`test/workspace-run-status.test.ts`、`test/workspace-service.test.ts` 与 `test/gui-controller.test.ts`。真实 Electron 验收先启动 `node scripts/dev-server.mjs`，再运行 `node e2e/multi-session.mjs`。覆盖初始化弹窗期间无任务标记、打开与重启恢复不发送模型请求、两个任务独立转圈和停止。托盘另由 `test/window-tray.test.ts` 和 `e2e/window-tray.mjs` 验证隐藏时任务完成、原窗口恢复、第二实例和菜单退出；后者支持 `PI_GUI_PACKAGED_EXECUTABLE` 指向真实安装包。非默认开发端口使用 `ELECTRON_RENDERER_URL`。验收只调用本机 SSE 模型替身，报告分别保存在 `artifacts/multi-session-*/results.json` 和 `artifacts/tray-*/results.json`。
